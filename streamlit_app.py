@@ -13,6 +13,8 @@ import streamlit as st
 from assessment import EXAMS, evaluate
 from auth import verify_password
 from storage import Store
+from rubrics import RUBRICS, bands, band_feedback, rubric_rows
+from gradebook import export_workbook
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title='역사의 시선 | 서논술형 평가', page_icon='📜', layout='wide')
@@ -47,15 +49,23 @@ def pdf_pages(number):
 
 def show_results(exam_id, row, preview=False):
     st.success('체험이 끝났습니다. 실제 응시 기록에는 저장되지 않았습니다.' if preview else '제출이 완료되었습니다. 이 평가에는 다시 응시할 수 없습니다.')
-    st.caption('단답형은 정오를 판정합니다. 서술·논술형은 규칙 기반 예비 피드백이며, 선생님 검토 후 최종 정오와 점수가 표시됩니다. 모범 답안은 제공하지 않습니다.')
+    st.caption('점수는 업로드한 루브릭을 적용한 규칙 기반 예비 평가입니다. 문맥이 모호한 항목은 검토 대기로 표시하며, 선생님이 최종 점수를 확정합니다. 모범 답안은 제공하지 않습니다.')
     answers = json.loads(row['answers'])
     # Refresh learning guidance for previous submissions without altering answers,
     # attempt counts, stored assessment history, or teacher-confirmed judgments.
     results = evaluate(exam_id, answers)
     st.caption('학습 피드백은 「피드백 내용.pdf」를 바탕으로 제공합니다. 이전 제출도 현재 자료 기준의 예비 피드백으로 표시합니다.')
     review = json.loads(row['review']) if row.get('review') else {}
-    if review:
+    scored_keys = list(RUBRICS[exam_id])
+    if all(key in review for key in scored_keys):
         st.metric('교사 확정 점수', f"{sum(v['score'] for v in review.values())} / 20")
+    elif all(results[key]['score'] is not None for key in scored_keys):
+        st.metric('루브릭 예비 점수 · 교사 미확정', f"{sum(results[key]['score'] for key in scored_keys)} / 20")
+    else:
+        st.warning('일부 항목은 문맥 검토가 필요하여 예비 총점을 확정하지 않았습니다.')
+    st.dataframe([{'문항': '1 (①+② 합산)' if key == 'production' else number,
+                   '예비 점수': results[key]['score'], '교사 확정 점수': review.get(key, {}).get('score'), '만점': points}
+                  for key, number, _, points, _ in EXAMS[exam_id]['questions'] if points], hide_index=True)
     for key, number, kind, points, prompt in EXAMS[exam_id]['questions']:
         with st.container(border=True):
             st.markdown(f'#### {number} · {kind}')
@@ -68,6 +78,16 @@ def show_results(exam_id, row, preview=False):
                     st.info(item['feedback'])
             else:
                 st.markdown(f"**{results[key]['status']}**")
+            if points:
+                item = results[key]
+                final_score = review.get(key, {}).get('score')
+                if final_score in bands(exam_id, key):
+                    st.info(f"확정 {final_score}점 피드백 · " + band_feedback(exam_id, key, final_score))
+                elif item['score'] is not None:
+                    st.info(f"예비 {item['score']} / {points}점 · " + item['score_feedback'])
+                else:
+                    st.warning(item['score_feedback'])
+                st.caption(f"채점 근거: {item['rubric_source']['file']} · PDF 1쪽")
             st.info(results[key]['feedback'])
             source = results[key]['source']
             st.caption(f"피드백 근거: {source['file']} · PDF {', '.join(map(str, source['pages']))}쪽")
@@ -119,12 +139,17 @@ identity = st.session_state['identity']
 if identity['role'] == '교사':
     st.header('교사 검토실')
     st.warning('문항2 채점기준 마지막 항목의 영국 “횡단정책” 표기는 검토가 필요합니다. 영국의 종단정책을 기준으로 예비 피드백을 구성했습니다. 원본 문항2의 세부 문항 번호 3-1~3-3을 유지했습니다.')
-    st.caption('부정 표현, 사실 오류, 자료 해석과 논증을 직접 확인하세요. 1-①은 명칭 확인용이며, 1-②와 합산하여 4점입니다.')
+    st.caption('표현 확인 규칙으로 원본 점수 구간을 추천합니다. 부정 표현, 사실 오류, 자료 해석과 논증은 직접 확인하세요. 1-①과 1-②는 합산 4점이며, 원본 기준의 최저 점수는 항목당 1점입니다.')
+    with st.expander('전체 루브릭 · 배점과 점수별 피드백 표'):
+        for rubric_exam in RUBRICS:
+            st.subheader(EXAMS[rubric_exam]['title'])
+            st.dataframe(rubric_rows(rubric_exam), hide_index=True)
     rows = store.all()
     cols = st.columns(3)
     cols[0].metric('전체 제출', len(rows))
     cols[1].metric('검토 대기', sum(not r['review'] for r in rows))
     cols[2].metric('검토 완료', sum(bool(r['review']) for r in rows))
+    st.download_button('루브릭·학생별 성적 Excel 내려받기', export_workbook(rows), '루브릭_평가결과.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     if not rows:
         st.info('아직 제출한 학생이 없습니다.')
         st.stop()
@@ -138,21 +163,40 @@ if identity['role'] == '교사':
     row = rows[selected]
     answers = json.loads(row['answers'])
     old = json.loads(row['review']) if row['review'] else {}
+    suggested = evaluate(row['exam'], answers)
+    st.dataframe([{'항목': suggested[key]['rubric_title'], '예비 점수': suggested[key]['score'], '확정 점수': old.get(key, {}).get('score'), '만점': suggested[key]['max_score'], '적용한 구간': suggested[key]['rubric_descriptor']}
+                  for key in RUBRICS[row['exam']]], hide_index=True)
     with st.form(f"review-{row['exam']}-{row['student']}"):
         review = {}
         for key, number, kind, points, prompt in EXAMS[row['exam']]['questions']:
             st.subheader(f'{number} · {kind}')
             st.write(prompt)
-            st.text(answers[key])
+            st.text(answers.get(key, ''))
             statuses = ['정답', '부분 정답', '오답']
             previous = old.get(key, {})
-            status = st.selectbox('최종 판정', statuses, index=statuses.index(previous.get('status', '부분 정답')), key=f'status-{key}-{selected}')
-            score = st.number_input('점수 (1-①은 0점, 1-②에 합산)', 0, points, int(previous.get('score', 0)), key=f'score-{key}-{selected}') if points else 0
+            if points:
+                item = suggested[key]
+                st.caption('추천 근거: ' + (' / '.join(item['evidence']) or '확인된 표현 없음'))
+                st.caption('추천 구간: ' + item['rubric_descriptor'])
+                options = list(bands(row['exam'], key))
+                default_score = previous.get('score', item['score'])
+                if previous and default_score not in options:
+                    st.warning('이전 점수가 현재 루브릭 구간에 없습니다. 기존 기록은 유지되며, 재확정 시 구간을 선택하세요.')
+                score = st.selectbox('루브릭 최종 점수', options, index=options.index(default_score) if default_score in options else None, format_func=lambda value, exam=row['exam'], k=key: f"{value}점 · {bands(exam, k)[value][0]}", key=f'score-{key}-{selected}', placeholder='문맥을 검토하고 점수 구간을 선택하세요')
+                status = '정답' if score == points else '부분 정답' if score is not None and score > 1 else '오답'
+                if score is not None:
+                    st.info(band_feedback(row['exam'], key, score))
+            else:
+                status = st.selectbox('최종 판정 (1번 합산의 명칭 확인)', statuses, index=statuses.index(previous.get('status', '정답' if suggested[key]['status'] == '정답' else '오답')), key=f'status-{key}-{selected}')
+                score = 0
             feedback = st.text_area('추가 피드백 · 모범 답안 대신 역사적 사실과 보완 방향을 안내하세요.', value=previous.get('feedback', ''), key=f'feedback-{key}-{selected}')
             review[key] = {'status': status, 'score': score, 'feedback': feedback}
         if st.form_submit_button('교사 판정 저장', type='primary'):
-            store.review(row['exam'], row['student'], review)
-            st.success('저장했습니다. 학생이 결과 화면에서 확인할 수 있습니다.')
+            if any(item['score'] is None for item in review.values()):
+                st.error('검토 대기 항목의 점수 구간을 모두 선택해 주세요.')
+            else:
+                store.review(row['exam'], row['student'], review)
+                st.success('저장했습니다. 학생이 확정 점수와 해당 점수 구간의 피드백을 확인할 수 있습니다.')
     st.stop()
 
 exam_id = st.selectbox('평가 선택', list(EXAMS), format_func=lambda key: EXAMS[key]['title'])

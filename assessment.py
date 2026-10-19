@@ -1,6 +1,7 @@
 """Server-side assessment definitions; never sent as a downloadable answer key."""
 import re
 from feedback_content import FACTS, CRITERIA, source_for
+from rubrics import score_answer
 
 EXAMS = {
     'industry': {
@@ -34,16 +35,13 @@ def contains(text, *words):
     return any(normalized(w) in normalized(text) for w in words)
 
 def evaluate(exam_id, answers):
-    """Conservative rules: free writing is always provisional and teacher-reviewed.
-
-    No automatic essay score: keyword coverage cannot establish historical reasoning.
-    """
+    """Provide source-based guidance and provisional discrete rubric scores."""
     result = {}
     for key, _, kind, points, _ in EXAMS[exam_id]['questions']:
         text = answers.get(key, '').strip()
         if key == 'event':
             correct = normalized(text) in {'산업혁명', '영국산업혁명', '산업혁명(industrialrevolution)', 'industrialrevolution'}
-            result[key] = {'status': '정답' if correct else '오답 · 교사 확인 가능', 'feedback': FACTS[key], 'source': source_for(exam_id, key), 'score': None}
+            result[key] = {'status': '정답' if correct else '오답 · 교사 확인 가능', 'feedback': FACTS[key], 'source': source_for(exam_id, key), 'score': 0}
             continue
         checks = {
             'production': [contains(text, '면직물', '옷감', '직물'), contains(text, '증가', '늘', '많', '대량'), contains(text, '기계', '공장')],
@@ -75,5 +73,6 @@ def evaluate(exam_id, answers):
         if contains(text, '않', '아니', '감소', '줄어'):
             status = '문맥 확인 필요 · 교사 검토 대기'
             feedback += ' 부정 표현이나 변화 방향은 문맥에 따라 의미가 달라지므로 선생님의 확인이 필요합니다.'
-        result[key] = {'status': status, 'feedback': feedback, 'source': source_for(exam_id, key), 'score': None}
+        graded = score_answer(exam_id, key, answers)
+        result[key] = {'status': status, 'feedback': feedback, 'source': source_for(exam_id, key), **graded}
     return result

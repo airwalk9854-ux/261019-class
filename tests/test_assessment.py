@@ -122,7 +122,11 @@ class AssessmentTests(unittest.TestCase):
         app.text_input[1].set_value('teacher-password')
         button(app, '로그인').click().run()
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.number_input), 4)
+        scores = [s for s in app.selectbox if s.key and s.key.startswith('score-')]
+        self.assertEqual(len(scores), 4)
+        for select in scores:
+            if select.value is None:
+                select.select(1)
         button(app, '교사 판정 저장').click().run()
         self.assertFalse(app.exception)
         self.assertIsNotNone(Store(self.path).get('industry', 's1')['review'])

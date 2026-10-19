@@ -2,6 +2,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from rubrics import bands
 
 class Store:
     def __init__(self, path):
@@ -34,6 +35,10 @@ class Store:
             return [dict(r) for r in db.execute('SELECT * FROM submissions ORDER BY submitted DESC')]
 
     def review(self, exam, student, review):
+        for key, item in review.items():
+            allowed = [0] if key == 'event' else bands(exam, key)
+            if item.get('score') not in allowed:
+                raise ValueError('루브릭에 없는 점수는 저장할 수 없습니다.')
         with self.connect() as db:
             db.execute('UPDATE submissions SET review=? WHERE exam=? AND student=?',
                        (json.dumps(review, ensure_ascii=False), exam, student))
