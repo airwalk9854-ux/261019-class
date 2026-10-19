@@ -4,8 +4,9 @@ Descriptors and matched text are teacher-only. Student feedback does not supply
 missing event/policy/incident names or reproduce the model responses.
 """
 import re
+from answer_matching import normalized, matching_terms, needs_context
 
-VERSION = 'rubric-pdf-v1'
+VERSION = 'rubric-pdf-v2-paraphrases'
 COMMON = {
     4: ('사건 명칭·생산 방식 전환·면직물 생산 증가를 모두 설명', '사건과 생산 방식, 생산량의 관계를 함께 설명했습니다. 자료와 인과관계가 자연스럽게 연결되는지 확인하세요.'),
     3: ('생산 방식 전환과 생산 증가를 설명하나 사건 명칭이 없음', '생산 방식과 생산량의 변화를 연결했습니다. 변화가 일어난 역사적 사건의 명칭을 확인해 보세요.'),
@@ -71,24 +72,28 @@ def rubric_rows(exam):
 def score_answer(exam, key, answers):
     text = answers.get(key, '').strip()
     combined = (answers.get('event', '') + ' ' + text) if key == 'production' else text
-    compact = re.sub(r'\s+', '', combined).lower()
+    compact = normalized(combined)
     evidence = []
 
     def has(label, *terms):
-        matches = [term for term in terms if re.sub(r'\s+', '', term).lower() in compact]
+        matches = matching_terms(combined, *terms)
         if matches:
             evidence.append(f'{label}: ' + ', '.join(matches))
         return bool(matches)
 
     # A rule engine cannot safely interpret negation, reversed attribution, or
     # contradictory context. It abstains instead of awarding a high band.
-    ambiguous = bool(re.search(r'않|아니|못했|못하|없었|없다|감소|줄어|영국(?:의|은|는)?횡단|프랑스(?:의|는|은)?종단', compact))
+    ambiguous = needs_context(combined, key)
     reason = ''
     score = None
+    checks = []
     if key == 'production':
         event = has('사건 명칭', '산업혁명', 'industrialrevolution')
         transition = has('이전 생산 방식', '가내수공업', '수공업') and has('이후 생산 방식', '공장제', '기계공업', '공장')
-        growth = has('생산물', '면직물', '직물', '옷감') and has('생산 증가', '증가', '늘어', '늘었', '많아', '대량생산', '급증')
+        product = has('생산물', '면직물', '직물', '옷감')
+        increase = has('생산 증가', '증가', '늘어', '늘었', '많아', '대량생산', '급증')
+        growth = product and increase
+        checks = [product, increase, transition]
         if transition and growth:
             score = 4 if event else 3
         elif event and transition:
@@ -104,6 +109,7 @@ def score_answer(exam, key, answers):
         life = has('생활 범위', '생활범위', '이동범위')
         leisure = has('여가', '여가', '여행')
         time = has('시간 개념', '시간개념', '시간표', '규칙적인시간', '규칙적시간')
+        checks = [exhibition or rail, (exhibition and achievement) or (rail and (life or leisure or time))]
         if (exhibition and display and power) or (rail and life and leisure and time):
             score = 4
         elif (exhibition and achievement) or (rail and life and leisure):
@@ -121,6 +127,7 @@ def score_answer(exam, key, answers):
         disease = has('전염병', '콜레라', '전염병')
         city = has('도시 생활 조건', '빈민가', '노동자밀집', '도시')
         poor = has('열악한 위생', '열악', '위생악화', '비위생')
+        checks = [labour or pollution, (labour and (exploitation or suffering)) or (pollution and disease)]
         if (labour and exploitation and source) or (pollution and disease and city and poor):
             score = 4
         elif (labour and (suffering or exploitation)) or (pollution and disease):
@@ -139,6 +146,7 @@ def score_answer(exam, key, answers):
         labour = has('사회 문제', '노동문제', '빈부격차', '노동착취', '아동노동', '계층격차')
         luddite = has('구체적 노동 운동', '러다이트', '기계파괴운동', '기계를파괴')
         critical = colony and exploitation or labour or luddite
+        checks = [positive, colony, exploitation, exhibition or exhibit]
         if positive and colony and exhibit and exploitation:
             score = 8
         elif positive and luddite:
@@ -154,16 +162,18 @@ def score_answer(exam, key, answers):
     elif key == 'rhodes':
         cause = has('배경', '실업', '계층갈등', '인구', '시장', '빈부격차')
         # A future goal ("확보하기 위해") is not an achieved result.
-        outcome = re.search(r'식민지[^.!?。]{0,35}(?:확보하였|확보했|확보했다|확장하였|확장했|확대하였|확대했|편입되|지배하였|지배했|차지하였|차지했|점령하였|점령했)', compact)
+        outcome = re.search(r'식민지[^.!?。]{0,35}(?:확보하였|확보했|확보했다|확장하였|확장했|확대하였|확대했|편입되|지배하였|지배했|차지하였|차지했|점령하였|점령했|삼았|만들었|넓혔)', compact)
         result = bool(outcome)
         if outcome:
             evidence.append('확보 결과: ' + outcome.group())
+        checks = [cause, result]
         score = 6 if cause and result else 4 if cause or result else 1
     elif key == 'france':
         policy = has('프랑스 정책', '횡단정책')
         incident = has('충돌 사건', '파쇼다')
         viewpoint = has('프랑스 관점', '우리프랑스', '프랑스인', '프랑스의입장', '프랑스입장', '나는', '우리')
         imperial = has('제국주의 상황', '제국주의', '식민지', '영국', '프랑스', '아프리카')
+        checks = [policy, incident, viewpoint]
         if policy and incident and viewpoint:
             score = 4
         elif policy != incident:
@@ -175,6 +185,7 @@ def score_answer(exam, key, answers):
         viewpoint = has('현지 주민 관점', '우리', '나는', '아프리카인의입장', '아프리카인으로')
         critical = has('비판·피해', '착취', '수탈', '빼앗', '침략', '강제노동', '주권침탈', '분노', '저항', '반대')
         partial = has('제국주의 이해', '제국주의', '식민지', '종단', '지배', '광산', '토지')
+        checks = [policy, viewpoint, critical]
         score = 6 if policy and viewpoint and critical else 4 if partial or critical else 1
 
     if ambiguous:
@@ -188,5 +199,6 @@ def score_answer(exam, key, answers):
         'rubric_descriptor': bands(exam, key)[score][0] if score is not None else reason,
         'score_feedback': band_feedback(exam, key, score) if score is not None else '문맥과 자료 근거를 확인한 뒤 선생님이 해당 점수 구간을 결정합니다.',
         'evidence': evidence, 'needs_review': True,
+        'criteria_checks': checks, 'context_required': ambiguous,
         'rubric_source': {'file': f"논술형 문항{1 if exam == 'industry' else 2} 답안.pdf", 'pages': [1], 'version': VERSION},
     }

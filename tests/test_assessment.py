@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -97,6 +98,30 @@ class AssessmentTests(unittest.TestCase):
         self.assertTrue(any('피드백 내용.pdf' in c.value for c in app.caption))
         self.assertFalse(any('이전 피드백' in i.value for i in app.info))
         self.assertTrue(any('교사 확인' in i.value for i in app.info))
+        self.assertEqual(before, store.get('industry', 's1'))
+
+    def test_results_render_with_missing_or_partial_source_metadata(self):
+        store = Store(self.path)
+        store.submit('industry', 's1', '검증학생', {'event': '산업혁명'}, {})
+        before = store.get('industry', 's1')
+        app = self.app()
+        app.session_state['identity'] = {'id': 's1', 'name': '검증학생', 'role': '학생'}
+        def legacy_evaluate(exam, answers):
+            result = evaluate(exam, answers)
+            for item in result.values():
+                item.pop('source', None)
+                item.pop('rubric_source', None)
+            result['production']['source'] = None
+            result['positive']['source'] = {'pages': None}
+            result['negative']['source'] = {'file': '', 'pages': []}
+            return result
+        with patch('assessment.evaluate', side_effect=legacy_evaluate):
+            app.run()
+        self.assertFalse(app.exception)
+        captions = [item.value for item in app.caption]
+        self.assertEqual(sum('피드백 근거: 피드백 내용.pdf' in value for value in captions), 5)
+        self.assertEqual(sum('채점 근거: 논술형 문항1 답안.pdf' in value for value in captions), 4)
+        self.assertGreaterEqual(len(app.info), 5)
         self.assertEqual(before, store.get('industry', 's1'))
 
     def test_student_submit_teacher_review_and_relogin(self):

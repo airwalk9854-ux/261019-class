@@ -37,7 +37,7 @@ CRITERIA = {
     'positive': ['선택한 기사에 해당하는 변화', '그 변화가 생활이나 산업에 미친 영향'],
     'negative': ['선택한 기사에 해당하는 문제', '그 문제의 구체적인 피해나 근거'],
     'critique': ['산업 발전의 긍정적인 측면', '해외 팽창과의 연결', '식민지 주민의 피해에 대한 비판', '제시 자료의 구체적인 근거'],
-    'rhodes': ['정책 추진의 배경', '정책 추진의 결과', '영국의 정책 명칭 또는 지도상의 방향'],
+    'rhodes': ['정책 추진의 배경', '정책 추진의 결과'],
     'france': ['프랑스의 정책 명칭', '두 국가의 정책이 충돌한 사건명', '프랑스인의 관점'],
     'africa': ['영국의 정책 명칭', '아프리카인의 관점', '피해에 대한 구체적 경험이나 감정'],
 }
@@ -47,3 +47,15 @@ def source_for(exam_id, key):
     if isinstance(pages, dict):
         pages = pages[exam_id]
     return {'file': SOURCE_FILE, 'pages': pages, 'version': SOURCE_VERSION}
+
+
+def resolve_source(exam_id, key, supplied=None):
+    """Recover provenance for old or partial results without discarding feedback."""
+    fallback = source_for(exam_id, key)
+    if not isinstance(supplied, dict):
+        return fallback
+    pages = supplied.get('pages')
+    if not isinstance(pages, list) or not pages or any(type(p) is not int or p < 1 for p in pages):
+        pages = fallback['pages']
+    return {'file': supplied.get('file') or fallback['file'], 'pages': pages,
+            'version': supplied.get('version') or fallback['version']}

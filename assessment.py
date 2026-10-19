@@ -1,5 +1,5 @@
 """Server-side assessment definitions; never sent as a downloadable answer key."""
-import re
+from answer_matching import contains, event_is_correct
 from feedback_content import FACTS, CRITERIA, source_for
 from rubrics import score_answer
 
@@ -28,30 +28,17 @@ EXAMS = {
     },
 }
 
-def normalized(text):
-    return re.sub(r'\s+', '', text).lower()
-
-def contains(text, *words):
-    return any(normalized(w) in normalized(text) for w in words)
-
 def evaluate(exam_id, answers):
     """Provide source-based guidance and provisional discrete rubric scores."""
     result = {}
     for key, _, kind, points, _ in EXAMS[exam_id]['questions']:
         text = answers.get(key, '').strip()
         if key == 'event':
-            correct = normalized(text) in {'산업혁명', '영국산업혁명', '산업혁명(industrialrevolution)', 'industrialrevolution'}
+            correct = event_is_correct(text)
             result[key] = {'status': '정답' if correct else '오답 · 교사 확인 가능', 'feedback': FACTS[key], 'source': source_for(exam_id, key), 'score': 0}
             continue
-        checks = {
-            'production': [contains(text, '면직물', '옷감', '직물'), contains(text, '증가', '늘', '많', '대량'), contains(text, '기계', '공장')],
-            'positive': [contains(text, '박람회', '철도', '기차'), contains(text, '전시', '국력', '시간', '여가', '여행', '생활범위')],
-            'negative': [contains(text, '아동', '어린이', '환경', '위생'), contains(text, '착취', '시간', '노동', '콜레라', '전염병', '오염')],
-            'critique': [contains(text, '박람회', '철도', '생산', '발전'), contains(text, '제국주의', '식민지'), contains(text, '착취', '수탈', '불평등', '희생', '침략'), contains(text, '(가)', '자료', '박람회', '전시장', '전시관')],
-            'rhodes': [contains(text, '실업', '인구', '계층', '시장', '원료', '빈부'), contains(text, '식민지', '지배', '점령'), contains(text, '종단', '남북', '케이프타운', '카이로')],
-            'france': [contains(text, '횡단'), contains(text, '파쇼다'), contains(text, '우리', '프랑스', '나는')],
-            'africa': [contains(text, '종단'), contains(text, '우리', '나는', '아프리카인'), contains(text, '착취', '수탈', '빼앗', '침략', '자유', '저항', '반대', '토지', '강제', '광산', '주권', '분노', '고통')],
-        }[key]
+        graded = score_answer(exam_id, key, answers)
+        checks = graded['criteria_checks']
         status = '관련 개념 확인 · 교사 검토 대기' if all(checks) else '보완 필요 · 교사 검토 대기'
         if not text:
             status = '미작성 · 교사 검토 대기'
@@ -70,9 +57,8 @@ def evaluate(exam_id, answers):
                     if not missing else '보완할 부분: ' + ', '.join(missing) + '. 자료의 근거와 연결하여 살펴보세요.')
         feedback = FACTS[fact_key] + ' ' + guidance
         # Negation and contradictions require human reading, regardless of keywords.
-        if contains(text, '않', '아니', '감소', '줄어'):
+        if graded['context_required']:
             status = '문맥 확인 필요 · 교사 검토 대기'
             feedback += ' 부정 표현이나 변화 방향은 문맥에 따라 의미가 달라지므로 선생님의 확인이 필요합니다.'
-        graded = score_answer(exam_id, key, answers)
-        result[key] = {'status': status, 'feedback': feedback, 'source': source_for(exam_id, key), **graded}
+        result[key] = {**graded, 'status': status, 'feedback': feedback, 'source': source_for(exam_id, key)}
     return result

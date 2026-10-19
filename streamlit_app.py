@@ -15,6 +15,7 @@ from auth import verify_password
 from storage import Store
 from rubrics import RUBRICS, bands, band_feedback, rubric_rows
 from gradebook import export_workbook
+from feedback_content import resolve_source
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title='역사의 시선 | 서논술형 평가', page_icon='📜', layout='wide')
@@ -87,9 +88,11 @@ def show_results(exam_id, row, preview=False):
                     st.info(f"예비 {item['score']} / {points}점 · " + item['score_feedback'])
                 else:
                     st.warning(item['score_feedback'])
-                st.caption(f"채점 근거: {item['rubric_source']['file']} · PDF 1쪽")
+                rubric_source = item.get('rubric_source') or {}
+                rubric_file = rubric_source.get('file') or f"논술형 문항{EXAMS[exam_id]['file_number']} 답안.pdf"
+                st.caption(f"채점 근거: {rubric_file} · PDF 1쪽")
             st.info(results[key]['feedback'])
-            source = results[key]['source']
+            source = resolve_source(exam_id, key, results[key].get('source'))
             st.caption(f"피드백 근거: {source['file']} · PDF {', '.join(map(str, source['pages']))}쪽")
 
 st.caption('HISTORY CLASSROOM / 생각을 쓰고, 역사로 돌아보다')
