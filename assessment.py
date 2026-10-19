@@ -1,5 +1,6 @@
 """Server-side assessment definitions; never sent as a downloadable answer key."""
 import re
+from feedback_content import FACTS, CRITERIA, source_for
 
 EXAMS = {
     'industry': {
@@ -32,17 +33,6 @@ def normalized(text):
 def contains(text, *words):
     return any(normalized(w) in normalized(text) for w in words)
 
-FACTS = {
-    'event': '18세기 후반 영국에서는 동력과 기계의 활용이 확대되면서 생산과 생활 전반에 큰 변화가 일어났습니다.',
-    'production': '생산량을 설명할 때에는 생산 도구, 작업 장소, 동력의 변화가 작업 속도와 규모에 미친 영향을 연결해 살펴볼 수 있습니다.',
-    'positive': '19세기 영국에서는 산업 성과를 보여 주는 전시와 철도망 확장이 나타났습니다. 자료 속 이동 시간·생활 범위·전시 내용은 변화의 근거가 됩니다.',
-    'negative': '공장 노동자의 생활과 도시의 위생은 산업화 과정에서 중요한 사회 문제였습니다. 당시 영국의 공장법은 아동의 노동 시간과 근로 조건을 규제하려 했습니다.',
-    'critique': '19세기의 산업 성장과 해외 식민지 확대는 서로 연결되어 있었습니다. 발전의 혜택과 비용이 어떤 집단에 돌아갔는지 구분하여 자료를 읽어 보세요.',
-    'rhodes': '19세기 말 제국주의를 옹호한 정치인들은 국내 사회 문제와 해외 시장을 연결했습니다. 발언에 담긴 주장과 지도에서 확인되는 결과를 구분할 필요가 있습니다.',
-    'france': '19세기 말 아프리카에서 유럽 열강의 세력 확대는 외교적 긴장을 일으켰습니다. 지도의 방향과 두 세력이 만나는 지역을 함께 살펴보세요.',
-    'africa': '아프리카의 식민지화는 현지 주민의 토지, 자원, 노동과 정치적 자율성에 영향을 주었습니다. 제국의 관점과 현지 주민의 관점은 다를 수 있습니다.',
-}
-
 def evaluate(exam_id, answers):
     """Conservative rules: free writing is always provisional and teacher-reviewed.
 
@@ -53,23 +43,37 @@ def evaluate(exam_id, answers):
         text = answers.get(key, '').strip()
         if key == 'event':
             correct = normalized(text) in {'산업혁명', '영국산업혁명', '산업혁명(industrialrevolution)', 'industrialrevolution'}
-            result[key] = {'status': '정답' if correct else '오답 · 교사 확인 가능', 'feedback': FACTS[key], 'score': None}
+            result[key] = {'status': '정답' if correct else '오답 · 교사 확인 가능', 'feedback': FACTS[key], 'source': source_for(exam_id, key), 'score': None}
             continue
         checks = {
             'production': [contains(text, '면직물', '옷감', '직물'), contains(text, '증가', '늘', '많', '대량'), contains(text, '기계', '공장')],
             'positive': [contains(text, '박람회', '철도', '기차'), contains(text, '전시', '국력', '시간', '여가', '여행', '생활범위')],
             'negative': [contains(text, '아동', '어린이', '환경', '위생'), contains(text, '착취', '시간', '노동', '콜레라', '전염병', '오염')],
-            'critique': [contains(text, '박람회', '철도', '생산', '발전'), contains(text, '제국주의', '식민지'), contains(text, '착취', '수탈', '불평등', '지배')],
-            'rhodes': [contains(text, '실업', '인구', '계층', '시장'), contains(text, '식민지', '지배', '점령'), contains(text, '(가)', '(나)', '자료', '지도', '발언')],
+            'critique': [contains(text, '박람회', '철도', '생산', '발전'), contains(text, '제국주의', '식민지'), contains(text, '착취', '수탈', '불평등', '희생', '침략'), contains(text, '(가)', '자료', '박람회', '전시장', '전시관')],
+            'rhodes': [contains(text, '실업', '인구', '계층', '시장', '원료', '빈부'), contains(text, '식민지', '지배', '점령'), contains(text, '종단', '남북', '케이프타운', '카이로')],
             'france': [contains(text, '횡단'), contains(text, '파쇼다'), contains(text, '우리', '프랑스', '나는')],
-            'africa': [contains(text, '종단'), contains(text, '우리', '나는', '아프리카인'), contains(text, '착취', '수탈', '빼앗', '침략', '자유', '저항', '반대')],
+            'africa': [contains(text, '종단'), contains(text, '우리', '나는', '아프리카인'), contains(text, '착취', '수탈', '빼앗', '침략', '자유', '저항', '반대', '토지', '강제', '광산', '주권', '분노', '고통')],
         }[key]
         status = '관련 개념 확인 · 교사 검토 대기' if all(checks) else '보완 필요 · 교사 검토 대기'
         if not text:
             status = '미작성 · 교사 검토 대기'
-        feedback = FACTS[key] + ' ' + ('관련 표현이 확인되었습니다. 근거와 인과관계의 타당성은 선생님이 최종 확인합니다.' if all(checks) else '자료의 구체적인 근거와 주장 사이의 연결을 다시 살펴보세요.')
+        fact_key = key
+        if key == 'positive':
+            rail, exhibition = contains(text, '철도', '기차'), contains(text, '박람회')
+            if rail != exhibition:
+                fact_key = 'positive_rail' if rail else 'positive_exhibition'
+        if key == 'negative':
+            labour = contains(text, '아동', '어린이', '노동')
+            environment = contains(text, '환경', '위생', '오염', '전염병', '콜레라')
+            if labour != environment:
+                fact_key = 'negative_labour' if labour else 'negative_environment'
+        missing = [label for label, matched in zip(CRITERIA[key], checks) if not matched]
+        guidance = ('관련 표현이 확인되었습니다. 자료 해석과 인과관계의 타당성은 선생님이 최종 확인합니다.'
+                    if not missing else '보완할 부분: ' + ', '.join(missing) + '. 자료의 근거와 연결하여 살펴보세요.')
+        feedback = FACTS[fact_key] + ' ' + guidance
         # Negation and contradictions require human reading, regardless of keywords.
         if contains(text, '않', '아니', '감소', '줄어'):
             status = '문맥 확인 필요 · 교사 검토 대기'
-        result[key] = {'status': status, 'feedback': feedback, 'score': None}
+            feedback += ' 부정 표현이나 변화 방향은 문맥에 따라 의미가 달라지므로 선생님의 확인이 필요합니다.'
+        result[key] = {'status': status, 'feedback': feedback, 'source': source_for(exam_id, key), 'score': None}
     return result

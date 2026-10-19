@@ -48,7 +48,11 @@ def pdf_pages(number):
 def show_results(exam_id, row, preview=False):
     st.success('체험이 끝났습니다. 실제 응시 기록에는 저장되지 않았습니다.' if preview else '제출이 완료되었습니다. 이 평가에는 다시 응시할 수 없습니다.')
     st.caption('단답형은 정오를 판정합니다. 서술·논술형은 규칙 기반 예비 피드백이며, 선생님 검토 후 최종 정오와 점수가 표시됩니다. 모범 답안은 제공하지 않습니다.')
-    answers, results = json.loads(row['answers']), json.loads(row['result'])
+    answers = json.loads(row['answers'])
+    # Refresh learning guidance for previous submissions without altering answers,
+    # attempt counts, stored assessment history, or teacher-confirmed judgments.
+    results = evaluate(exam_id, answers)
+    st.caption('학습 피드백은 「피드백 내용.pdf」를 바탕으로 제공합니다. 이전 제출도 현재 자료 기준의 예비 피드백으로 표시합니다.')
     review = json.loads(row['review']) if row.get('review') else {}
     if review:
         st.metric('교사 확정 점수', f"{sum(v['score'] for v in review.values())} / 20")
@@ -65,6 +69,8 @@ def show_results(exam_id, row, preview=False):
             else:
                 st.markdown(f"**{results[key]['status']}**")
             st.info(results[key]['feedback'])
+            source = results[key]['source']
+            st.caption(f"피드백 근거: {source['file']} · PDF {', '.join(map(str, source['pages']))}쪽")
 
 st.caption('HISTORY CLASSROOM / 생각을 쓰고, 역사로 돌아보다')
 st.title('역사의 시선')
