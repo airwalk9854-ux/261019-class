@@ -16,6 +16,7 @@ from storage import Store
 from rubrics import RUBRICS, bands, band_feedback, rubric_rows
 from gradebook import export_workbook
 from feedback_content import resolve_source
+from question_content import QUESTIONS, NEWS, RHODES, answers_for
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title='역사의 시선 | 서논술형 평가', page_icon='📜', layout='wide')
@@ -40,13 +41,59 @@ def get_store(path):
 store = get_store(os.environ.get('ASSESSMENT_DB_PATH', str(ROOT / 'runtime' / 'assessment.sqlite3')))
 
 @st.cache_data
-def pdf_pages(number):
+def material_image(number, clip):
     files = [p for p in (ROOT / 'data').glob('*.pdf')
              if unicodedata.normalize('NFC', p.name) == f'논술형 문항{number}.pdf']
     if not files:
-        return []
+        return None
     with pymupdf.open(files[0]) as doc:
-        return [page.get_pixmap(matrix=pymupdf.Matrix(2, 2)).tobytes('png') for page in doc]
+        return doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(clip)).tobytes('png')
+
+
+def show_material_image(number, clip, caption):
+    picture = material_image(number, clip)
+    if picture:
+        st.image(picture, caption=caption, width='stretch')
+    else:
+        st.error('제시 자료를 찾지 못했습니다. 선생님께 문의하세요.')
+
+
+def show_materials(material):
+    st.subheader('제시 자료')
+    if material == 'production':
+        left, right = st.columns(2)
+        with left:
+            show_material_image('2', (64, 93, 292, 267), '(가) 가내 수공업')
+        with right:
+            show_material_image('2', (302, 94, 528, 267), '(나) 공장제 기계공업')
+    elif material == 'news':
+        st.caption('19세기 영국 사회를 다룬 가상의 신문 기사 · 원본의 기사와 설명을 읽기 쉬운 글로 재구성했습니다.')
+        for title, text in NEWS:
+            with st.container(border=True):
+                st.markdown(f'#### {title}')
+                st.markdown(text)
+    else:
+        with st.container(border=True):
+            st.markdown('#### (가) 세실 로즈의 발언')
+            st.write(RHODES)
+        left, right = st.columns([1, 1.3])
+        with left:
+            show_material_image('2', (64, 503, 247, 746), '(나) 세실 로즈를 표현한 풍자화')
+        with right:
+            show_material_image('2', (267, 495, 534, 758), '(다) 아프리카 지도')
+    if material == 'news':
+        st.caption('출처: 원본 문항1 PDF의 기사 및 환경·위생 설명.')
+    else:
+        st.caption('출처: 원본 문항 PDF의 그림·기사·지도. 그림은 확대해서 볼 수 있습니다.')
+
+
+def save_draft(draft_key, widget_key):
+    st.session_state['drafts'][draft_key] = st.session_state[widget_key]
+
+
+def move_question(number):
+    st.session_state['question_number'] = number
+
 
 def show_results(exam_id, row, preview=False):
     st.success('체험이 끝났습니다. 실제 응시 기록에는 저장되지 않았습니다.' if preview else '제출이 완료되었습니다. 이 평가에는 다시 응시할 수 없습니다.')
@@ -109,7 +156,8 @@ with st.sidebar:
             st.rerun()
     st.divider()
     st.markdown('**응시 안내**\n\n① 자료를 살펴보세요.\n\n② 모든 답안을 작성하세요.\n\n③ 최종 제출 후 피드백을 확인하세요.')
-    st.caption('평가별 학생 계정당 1회 제출 · 총 20점')
+    st.caption('모든 문제를 작성한 뒤 최종 제출하세요.')
+    question_menu = st.empty()
 
 if not st.session_state.get('identity'):
     login, demo = st.tabs(['학생·교사 로그인', '미리 체험하기'])
@@ -202,60 +250,111 @@ if identity['role'] == '교사':
                 st.success('저장했습니다. 학생이 확정 점수와 해당 점수 구간의 피드백을 확인할 수 있습니다.')
     st.stop()
 
-exam_id = st.selectbox('평가 선택', list(EXAMS), format_func=lambda key: EXAMS[key]['title'])
-exam = EXAMS[exam_id]
 preview = identity['role'] == '체험'
 if preview:
     st.info('체험 모드 · 실제 응시 횟수에 반영되지 않습니다.')
-row = st.session_state.get(f'demo-{exam_id}') if preview else store.get(exam_id, identity['id'])
-if row:
-    show_results(exam_id, row, preview)
+rows = {exam_id: (st.session_state.get(f'demo-{exam_id}') if preview else store.get(exam_id, identity['id']))
+        for exam_id in EXAMS}
+pending = [exam_id for exam_id, row in rows.items() if not row]
+if 'drafts' not in st.session_state:
+    st.session_state['drafts'] = {}
+    # Reuse the common answer when one original assessment was already submitted.
+    for row in rows.values():
+        if row:
+            for key, value in json.loads(row['answers']).items():
+                if key in ('event', 'production'):
+                    st.session_state['drafts'][f'industry:{key}'] = value
+            break
+    for e, row in rows.items():
+        if row:
+            for key, value in json.loads(row['answers']).items():
+                if key not in ('event', 'production'):
+                    st.session_state['drafts'][f'{e}:{key}'] = value
+drafts = st.session_state['drafts']
+
+with question_menu.container():
+    st.divider()
+    st.markdown('### 문제 선택')
+    number = st.radio('문제 번호', range(1, len(QUESTIONS) + 1),
+                      format_func=lambda n: f'{n}번 · {QUESTIONS[n-1][0]}',
+                      key='question_number', label_visibility='collapsed')
+
+if not pending:
+    st.header('제출 결과')
+    for exam_id, row in rows.items():
+        with st.expander(EXAMS[exam_id]['title'], expanded=True):
+            show_results(exam_id, row, preview)
     if preview and st.button('체험 다시 시작'):
-        del st.session_state[f'demo-{exam_id}']
         for key in list(st.session_state):
-            if key.startswith(f'answer-{exam_id}-'):
+            if key.startswith(('demo-', 'draft-', 'answer-')) or key in ('drafts', 'question_number', 'confirm_submission'):
                 del st.session_state[key]
         st.rerun()
     st.stop()
 
-st.header(exam['title'])
-st.write(exam['description'])
-st.caption('원본 문항 20점 유지 · 1번을 단답형과 서술형 입력으로 나누었습니다. 제출 전까지 수정할 수 있습니다.')
-source, writing = st.columns([1, 1], gap='large')
-with source:
-    st.subheader('01 / 제시 자료')
-    st.caption('그림과 기사·지도는 이미지의 확대 아이콘으로 자세히 살펴볼 수 있습니다.')
-    pages = pdf_pages(exam['file_number'])
-    if not pages:
-        st.error('문항 PDF를 찾지 못했습니다. 선생님께 문의하세요.')
-        st.stop()
-    for i, page in enumerate(pages):
-        st.image(page, caption=f"원본 문항 {exam['file_number']} · {i+1}쪽", width='stretch')
-with writing:
-    st.subheader('02 / 나의 답안')
-    st.caption('제출 버튼을 눌렀을 때 저장됩니다. 제출 전에는 창을 닫거나 새로고침하지 마세요.')
-    with st.form(f'exam-{exam_id}'):
-        answers = {}
-        for key, number, kind, points, prompt in exam['questions']:
-            st.markdown(f'**{number} · {kind}**' + (f' / {points}점' if points else ' / 1번 합산'))
-            if kind == '단답형':
-                answers[key] = st.text_input(prompt, key=f'answer-{exam_id}-{key}', max_chars=100)
-            else:
-                answers[key] = st.text_area(prompt, key=f'answer-{exam_id}-{key}', height=150 if kind == '논술형' else 100, max_chars=5000)
-        confirmed = st.checkbox('모든 답안을 확인했습니다. 최종 제출 후에는 수정하거나 다시 응시할 수 없음을 이해했습니다.')
-        submit = st.form_submit_button('최종 제출하고 피드백 보기', type='primary', width='stretch')
-    if submit:
-        if not confirmed:
-            st.error('제출 안내 확인란을 체크해 주세요.')
-        elif any(not value.strip() for value in answers.values()):
-            st.error('모든 문항에 답을 입력해 주세요.')
+title, exam_id, keys, material = QUESTIONS[number - 1]
+common = number == 1
+locked = not pending if common else exam_id not in pending
+complete = sum(all(answers_for(e, drafts).get(k, '').strip() for k in question_keys)
+               for _, e, question_keys, _ in QUESTIONS)
+st.header(f'{number}번. {title}')
+st.progress(complete / len(QUESTIONS), text=f'작성 완료 {complete} / {len(QUESTIONS)}문제')
+show_materials(material)
+st.divider()
+st.subheader('나의 답안')
+if locked:
+    st.info('이미 제출한 문제입니다. 저장된 답안을 보여드립니다.')
+    saved = json.loads(rows[exam_id]['answers'])
+    for key, _, _, _, prompt in EXAMS[exam_id]['questions']:
+        if key in keys:
+            st.write(prompt)
+            st.text(saved.get(key, ''))
+else:
+    st.caption('문제를 이동해도 작성한 답안은 유지됩니다. 창을 닫거나 새로고침하면 제출 전 답안이 사라질 수 있습니다.')
+    for key, _, kind, points, prompt in EXAMS[exam_id]['questions']:
+        if key not in keys:
+            continue
+        if key == 'production':
+            prompt = '앞에서 쓴 사건과 연결하여 생산 방식과 면직물 생산량이 어떻게 변했는지 서술하세요.'
+        draft_key = f'{exam_id}:{key}'
+        widget_key = f'draft-{draft_key}'
+        label = prompt + (f' ({points}점)' if points else ' (아래 서술형과 합산 4점)')
+        if widget_key not in st.session_state:
+            st.session_state[widget_key] = drafts.get(draft_key, '')
+        options = dict(key=widget_key, on_change=save_draft, args=(draft_key, widget_key))
+        if kind == '단답형':
+            st.text_input(label, max_chars=100, **options)
         else:
-            result = evaluate(exam_id, answers)
-            if preview:
-                st.session_state[f'demo-{exam_id}'] = {'answers': json.dumps(answers, ensure_ascii=False), 'result': json.dumps(result, ensure_ascii=False), 'review': None}
-                st.rerun()
+            st.text_area(label, height=220 if kind == '논술형' else 160, max_chars=5000, **options)
+
+previous, following = st.columns(2)
+previous.button('← 이전 문제', disabled=number == 1, on_click=move_question, args=(number - 1,), width='stretch')
+following.button('다음 문제 →', disabled=number == len(QUESTIONS), on_click=move_question, args=(number + 1,), width='stretch')
+st.divider()
+st.caption('1번은 두 원본 PDF의 공통 문제로 한 번만 작성합니다. 채점은 기존 기준에 따라 각 평가에 공통 답안을 반영하며, 원본별 20점을 유지합니다.')
+confirmed = st.checkbox('모든 답안을 확인했습니다. 최종 제출 후에는 수정하거나 다시 응시할 수 없음을 이해했습니다.', key='confirm_submission')
+if st.button('최종 제출하고 피드백 보기', type='primary', width='stretch'):
+    missing = [n for n, (_, e, question_keys, _) in enumerate(QUESTIONS, 1)
+               if (e in pending or n == 1) and any(not answers_for(e, drafts)[k].strip() for k in question_keys)]
+    if missing:
+        st.error('답안을 작성하지 않은 문제: ' + ', '.join(f'{n}번' for n in missing))
+    elif not confirmed:
+        st.error('제출 안내 확인란을 체크해 주세요.')
+    else:
+        submissions = {e: answers_for(e, drafts) for e in pending}
+        if preview:
+            for e, answers in submissions.items():
+                st.session_state[f'demo-{e}'] = {'answers': json.dumps(answers, ensure_ascii=False),
+                                                'result': json.dumps(evaluate(e, answers), ensure_ascii=False), 'review': None}
+        else:
             try:
-                store.submit(exam_id, identity['id'], identity['name'], answers, result)
+                store.submit_many(identity['id'], identity['name'], submissions)
             except sqlite3.IntegrityError:
-                st.warning('이미 제출한 평가입니다. 저장된 결과를 보여 드립니다.')
-            st.rerun()
+                st.warning('다른 화면에서 제출한 평가가 있습니다. 저장된 기록을 다시 확인합니다.')
+        st.rerun()
+
+if any(rows.values()):
+    with st.expander('기존에 제출한 평가 결과'):
+        for e, row in rows.items():
+            if row:
+                st.subheader(EXAMS[e]['title'])
+                show_results(e, row, preview)

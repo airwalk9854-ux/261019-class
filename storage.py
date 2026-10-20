@@ -34,6 +34,15 @@ class Store:
         with self.connect() as db:
             return [dict(r) for r in db.execute('SELECT * FROM submissions ORDER BY submitted DESC')]
 
+    def submit_many(self, student, name, submissions):
+        """Save the unified screen in one transaction, preserving attempt limits."""
+        from assessment import evaluate
+        with self.connect() as db:
+            for exam, answers in submissions.items():
+                db.execute('INSERT INTO submissions(exam,student,name,answers,result,submitted) VALUES (?,?,?,?,?,?)',
+                           (exam, student, name, json.dumps(answers, ensure_ascii=False),
+                            json.dumps(evaluate(exam, answers), ensure_ascii=False), datetime.now(timezone.utc).isoformat()))
+
     def review(self, exam, student, review):
         for key, item in review.items():
             allowed = [0] if key == 'event' else bands(exam, key)

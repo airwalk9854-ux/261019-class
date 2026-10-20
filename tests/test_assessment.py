@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -130,23 +131,29 @@ class AssessmentTests(unittest.TestCase):
         app.text_input[1].set_value('student-password')
         button(app, '로그인').click().run()
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.get('image')), 1)
+        self.assertEqual(len(app.get('image')), 2)
         # Empty submission is refused, then all answers are supplied.
         button(app, '최종 제출하고 피드백 보기').click().run()
         self.assertTrue(app.error)
         app.text_input[0].set_value('산업혁명')
         for text in app.text_area:
             text.set_value('공장과 기계의 발전, 면직물 생산 증가에 관한 자료 근거입니다.')
+        app.run()
+        for number in range(2, 8):
+            app.sidebar.radio[0].set_value(number).run()
+            app.text_area[0].set_value('공장과 기계의 발전, 면직물 생산 증가에 관한 자료 근거입니다.').run()
         app.checkbox[0].check()
         button(app, '최종 제출하고 피드백 보기').click().run()
         self.assertFalse(app.exception)
         self.assertTrue(app.success)
-        self.assertEqual(len(Store(self.path).all()), 1)
+        self.assertEqual(len(Store(self.path).all()), 2)
         button(app, '로그아웃').click().run()
         app.radio[0].set_value('교사')
         app.text_input[1].set_value('teacher-password')
         button(app, '로그인').click().run()
         self.assertFalse(app.exception)
+        submission = next(s for s in app.selectbox if s.label == '검토할 제출')
+        submission.select(next(i for i, row in enumerate(Store(self.path).all()) if row['exam'] == 'industry')).run()
         scores = [s for s in app.selectbox if s.key and s.key.startswith('score-')]
         self.assertEqual(len(scores), 4)
         for select in scores:
@@ -164,22 +171,43 @@ class AssessmentTests(unittest.TestCase):
         self.assertFalse(app.text_area)
         self.assertTrue(any('교사 확정 점수' in m.label for m in app.metric))
 
-    def test_demo_second_exam_does_not_persist(self):
+    def test_navigation_preserves_answers_and_demo_does_not_persist(self):
         app = self.app()
         button(app, '체험 시작').click().run()
-        app.selectbox[0].select('imperialism').run()
-        self.assertFalse(app.exception)
-        self.assertEqual(len(app.get('image')), 2)
+        self.assertFalse(app.selectbox)  # All questions share one continuous menu.
+        self.assertEqual(len(app.sidebar.radio[0].options), 7)
         app.text_input[0].set_value('산업혁명')
-        for text in app.text_area:
-            text.set_value('당시 자료를 바탕으로 작성한 체험 답안입니다.')
+        app.text_area[0].set_value('기계와 공장으로 생산 방식이 변하고 면직물 생산량이 증가했다.').run()
+        for number in range(2, 8):
+            app.sidebar.radio[0].set_value(number).run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.text_area), 1)
+            app.text_area[0].set_value(f'{number}번 자료를 바탕으로 작성한 체험 답안입니다.').run()
+        button(app, '← 이전 문제').click().run()
+        self.assertEqual(app.text_area[0].value, '6번 자료를 바탕으로 작성한 체험 답안입니다.')
+        app.sidebar.radio[0].set_value(1).run()
+        self.assertEqual(app.text_input[0].value, '산업혁명')
+        self.assertIn('면직물', app.text_area[0].value)
         app.checkbox[0].check()
         button(app, '최종 제출하고 피드백 보기').click().run()
         self.assertFalse(app.exception)
         self.assertTrue(app.success)
         self.assertEqual(Store(self.path).all(), [])
+        industry = json.loads(app.session_state['demo-industry']['answers'])
+        imperialism = json.loads(app.session_state['demo-imperialism']['answers'])
+        self.assertEqual(industry['production'], imperialism['production'])
+        self.assertEqual(industry['event'], imperialism['event'])
         button(app, '체험 다시 시작').click().run()
-        self.assertEqual(len(app.text_area), 4)
+        self.assertEqual(app.text_input[0].value, '')
+        self.assertEqual(app.text_area[0].value, '')
+
+    def test_unified_submission_rolls_back_on_duplicate(self):
+        store = Store(self.path)
+        store.submit('imperialism', 's1', '학생', {}, {})
+        with self.assertRaises(sqlite3.IntegrityError):
+            store.submit_many('s1', '학생', {'industry': {}, 'imperialism': {}})
+        self.assertIsNone(store.get('industry', 's1'))
+
 
 if __name__ == '__main__':
     unittest.main()
