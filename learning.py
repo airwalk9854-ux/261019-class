@@ -17,7 +17,18 @@ def score(attempt):
     return None if any(value is None for value in values) else sum(values)
 
 
+def refresh_attempts(attempts):
+    """Apply current rules for display; retain the original stored audit trail."""
+    refreshed = {}
+    for (number, round_number), attempt in attempts.items():
+        _, exam, keys, _ = QUESTIONS[number - 1]
+        result = evaluate(exam, attempt['answers'])
+        refreshed[number, round_number] = {**attempt, 'result': {key: result[key] for key in keys}}
+    return refreshed
+
+
 def comparison(attempts):
+    attempts = refresh_attempts(attempts)
     rows = []
     for number, (title, exam, keys, _) in enumerate(QUESTIONS, 1):
         if (number, 1) not in attempts or (number, 2) not in attempts:

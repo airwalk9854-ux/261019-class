@@ -1,7 +1,7 @@
 """Transparent Korean paraphrase rules; no external model or API is used.
 
 Recognize equivalent curriculum expressions, not whole-answer similarity.
-Negation and incorrectly attributed historical policies still require review.
+Negated claims and incorrectly attributed policies are excluded from evidence.
 """
 import re
 import unicodedata
@@ -57,8 +57,20 @@ ALIASES = {
 }
 
 
-def matching_terms(text, *terms):
+def affirmed_text(text):
+    """Exclude locally negated factual claims while retaining critical opinions."""
     compact = normalized(text)
+    compact = re.sub(
+        r'(?:산업혁명|industrialrevolution|착취|수탈|침략|전시|확보|확대|발전|발달|증가|늘|감소|줄어|줄었|발생|유행|충돌|노동|추진|빼앗|오염|일하|종단정책|횡단정책|파쇼다)'
+        r'[가-힣]{0,6}?(?:않|아니|없|못)',
+        ' ', compact)
+    # A named country's opposite policy is a factual error, never a typo.
+    compact = re.sub(r'영국(?:의|은|는)?횡단정책|프랑스(?:의|는|은)?종단정책', ' ', compact)
+    return compact
+
+
+def matching_terms(text, *terms):
+    compact = affirmed_text(text)
     found = []
     for term in terms:
         for candidate in (term, *ALIASES.get(term, ())):
@@ -78,7 +90,7 @@ def needs_context(text, key):
     if key == 'production':
         return bool(re.search(r'아니|않|못|감소|줄어|줄었|늘지|증가대신', compact))
     # Criticism such as "정당화할 수 없다" or "쉬지도 못했다" is
-    # compatible with these tasks. Negated rubric facts still require review.
+    # compatible with these tasks. Negated facts receive a scoring explanation.
     return bool(re.search(
         r'(?:착취|수탈|침략|전시|확보|확대|발전|발달|증가|발생|유행|충돌|노동|추진|빼앗|오염|일하)[가-힣]{0,5}(?:않|아니|없|못)|'
         r'(?:종단정책|횡단정책|파쇼다)[가-힣]{0,4}(?:아니|없)|'

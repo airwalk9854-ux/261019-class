@@ -17,7 +17,7 @@ from rubrics import RUBRICS, bands, band_feedback, rubric_rows
 from gradebook import export_workbook
 from feedback_content import resolve_source
 from question_content import QUESTIONS, NEWS, RHODES, answers_for
-from learning import grade_question, comparison
+from learning import grade_question, comparison, refresh_attempts
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title='역사의 시선 | 서논술형 평가', page_icon='📜', layout='wide')
@@ -92,24 +92,30 @@ def move_question(number):
     st.session_state['question_number'] = number
 
 
+def show_spelling(item):
+    notices = item.get('spelling', [])
+    if notices:
+        changes = ' / '.join(f"{n['original']} → {n['suggestion']}" for n in notices)
+        st.warning('오타 의심 표현: ' + changes)
+        st.caption('채점에서는 위 표기를 보정해 내용을 판단했습니다. 제출한 원문은 유지되며, 오타 자체로 별도 감점하지 않습니다.')
+
+
 def show_results(exam_id, row, preview=False):
     st.success('체험이 끝났습니다. 실제 응시 기록에는 저장되지 않았습니다.' if preview else '제출이 완료되었습니다. 이 평가에는 다시 응시할 수 없습니다.')
-    st.caption('점수는 업로드한 루브릭을 적용한 규칙 기반 예비 평가입니다. 문맥이 모호한 항목은 검토 대기로 표시하며, 선생님이 최종 점수를 확정합니다. 모범 답안은 제공하지 않습니다.')
+    st.caption('점수는 업로드한 루브릭에 따른 자동 채점 결과입니다. 확인된 서술 요소와 사실관계를 기준으로 점수 구간을 적용합니다. 모범 답안은 제공하지 않습니다.')
     answers = json.loads(row['answers'])
     # Refresh learning guidance for previous submissions without altering answers,
     # attempt counts, stored assessment history, or teacher-confirmed judgments.
     results = evaluate(exam_id, answers)
-    st.caption('학습 피드백은 「피드백 내용.pdf」를 바탕으로 제공합니다. 이전 제출도 현재 자료 기준의 예비 피드백으로 표시합니다.')
+    st.caption('학습 피드백은 「피드백 내용.pdf」를 바탕으로 제공합니다. 이전 제출도 현재 자료 기준의 자동 피드백으로 표시합니다.')
     review = json.loads(row['review']) if row.get('review') else {}
     scored_keys = list(RUBRICS[exam_id])
     if all(key in review for key in scored_keys):
         st.metric('교사 확정 점수', f"{sum(v['score'] for v in review.values())} / 20")
-    elif all(results[key]['score'] is not None for key in scored_keys):
-        st.metric('루브릭 예비 점수 · 교사 미확정', f"{sum(results[key]['score'] for key in scored_keys)} / 20")
     else:
-        st.warning('일부 항목은 문맥 검토가 필요하여 예비 총점을 확정하지 않았습니다.')
+        st.metric('루브릭 자동 채점 점수', f"{sum(results[key]['score'] for key in scored_keys)} / 20")
     st.dataframe([{'문항': '1 (①+② 합산)' if key == 'production' else number,
-                   '예비 점수': results[key]['score'], '교사 확정 점수': review.get(key, {}).get('score'), '만점': points}
+                   '자동 점수': results[key]['score'], '교사 확정 점수': review.get(key, {}).get('score'), '만점': points}
                   for key, number, _, points, _ in EXAMS[exam_id]['questions'] if points], hide_index=True)
     for key, number, kind, points, prompt in EXAMS[exam_id]['questions']:
         with st.container(border=True):
@@ -128,14 +134,13 @@ def show_results(exam_id, row, preview=False):
                 final_score = review.get(key, {}).get('score')
                 if final_score in bands(exam_id, key):
                     st.info(f"확정 {final_score}점 피드백 · " + band_feedback(exam_id, key, final_score))
-                elif item['score'] is not None:
-                    st.info(f"예비 {item['score']} / {points}점 · " + item['score_feedback'])
                 else:
-                    st.warning(item['score_feedback'])
+                    st.info(f"자동 {item['score']} / {points}점 · " + item['score_feedback'])
                 rubric_source = item.get('rubric_source') or {}
                 rubric_file = rubric_source.get('file') or f"논술형 문항{EXAMS[exam_id]['file_number']} 답안.pdf"
                 st.caption(f"채점 근거: {rubric_file} · PDF 1쪽")
             st.info(results[key]['feedback'])
+            show_spelling(results[key])
             source = resolve_source(exam_id, key, results[key].get('source'))
             st.caption(f"피드백 근거: {source['file']} · PDF {', '.join(map(str, source['pages']))}쪽")
 
@@ -180,7 +185,8 @@ with st.sidebar:
 - 제출한 1·2차 답안과 피드백은 각각 보관됩니다. 학생 계정은 재접속해도 이어서 진행할 수 있습니다.
 - 제출 전 입력은 새로고침이나 창 닫기 시 사라질 수 있습니다. 체험 기록은 현재 세션에서만 유지됩니다.
 - 전체 학습 점수는 공통 1번을 한 번만 합산한 **36점 만점**입니다.
-- 자동 채점은 루브릭에 따른 예비 결과이며, 교사가 최종 확정합니다. 문맥 검토가 필요한 점수와 관련 총점·향상 폭은 검토 대기로 표시합니다.
+- 루브릭에서 충족한 서술 요소로 자동 채점합니다. 부정된 사실과 잘못 연결한 정책은 해당 기준에서 제외합니다.
+- 오타 의심 표현은 수정 제안과 함께 알려 드립니다. 원문은 보관하며 오타만으로 별도 감점하지 않습니다.
 """)
     question_menu = st.empty()
 
@@ -214,8 +220,8 @@ if not st.session_state.get('identity'):
 identity = st.session_state['identity']
 if identity['role'] == '교사':
     st.header('교사 검토실')
-    st.warning('문항2 채점기준 마지막 항목의 영국 “횡단정책” 표기는 검토가 필요합니다. 영국의 종단정책을 기준으로 예비 피드백을 구성했습니다. 원본 문항2의 세부 문항 번호 3-1~3-3을 유지했습니다.')
-    st.caption('표현 확인 규칙으로 원본 점수 구간을 추천합니다. 부정 표현, 사실 오류, 자료 해석과 논증은 직접 확인하세요. 1-①과 1-②는 합산 4점이며, 원본 기준의 최저 점수는 항목당 1점입니다.')
+    st.warning('문항2 채점기준 마지막 항목의 영국 “횡단정책” 표기는 검토가 필요합니다. 영국의 종단정책을 기준으로 자동 피드백을 구성했습니다. 원본 문항2의 세부 문항 번호 3-1~3-3을 유지했습니다.')
+    st.caption('표현 확인 규칙으로 원본 점수 구간을 자동 적용합니다. 교사 추가 검토와 점수 조정은 선택 사항이며 학생의 자동 채점 결과는 즉시 제공됩니다. 1-①과 1-②는 합산 4점이며, 원본 기준의 최저 점수는 항목당 1점입니다.')
     with st.expander('전체 루브릭 · 배점과 점수별 피드백 표'):
         for rubric_exam in RUBRICS:
             st.subheader(EXAMS[rubric_exam]['title'])
@@ -223,7 +229,7 @@ if identity['role'] == '교사':
     rows = store.all()
     cols = st.columns(3)
     cols[0].metric('전체 제출', len(rows))
-    cols[1].metric('검토 대기', sum(not r['review'] for r in rows))
+    cols[1].metric('자동 채점 완료 · 교사 추가 검토 전', sum(not r['review'] for r in rows))
     cols[2].metric('검토 완료', sum(bool(r['review']) for r in rows))
     st.download_button('루브릭·학생별 성적 Excel 내려받기', export_workbook(rows), '루브릭_평가결과.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     if not rows:
@@ -231,11 +237,11 @@ if identity['role'] == '교사':
         st.stop()
     export = io.StringIO()
     writer = csv.writer(export)
-    writer.writerow(['평가', '학생 아이디', '이름', '제출 시각(UTC)', '답안', '예비 피드백', '교사 판정'])
+    writer.writerow(['평가', '학생 아이디', '이름', '제출 시각(UTC)', '답안', '자동 피드백', '교사 판정'])
     for row in rows:
         writer.writerow(["'" + str(row[k]) if str(row[k]).startswith(('=', '+', '-', '@')) else row[k] for k in ['exam', 'student', 'name', 'submitted', 'answers', 'result', 'review']])
     st.download_button('제출 기록 CSV 내려받기', export.getvalue().encode('utf-8-sig'), '평가기록.csv', 'text/csv')
-    selected = st.selectbox('검토할 제출', range(len(rows)), format_func=lambda i: f"{rows[i]['name']} ({rows[i]['student']}) · {EXAMS[rows[i]['exam']]['title']} · {'검토 완료' if rows[i]['review'] else '검토 대기'}")
+    selected = st.selectbox('검토할 제출', range(len(rows)), format_func=lambda i: f"{rows[i]['name']} ({rows[i]['student']}) · {EXAMS[rows[i]['exam']]['title']} · {'검토 완료' if rows[i]['review'] else '자동 채점 완료'}")
     row = rows[selected]
     answers = json.loads(row['answers'])
     old = json.loads(row['review']) if row['review'] else {}
@@ -248,7 +254,7 @@ if identity['role'] == '교사':
                 st.write(f'{number}번 · {round_number}차')
                 st.json(attempt['answers'])
     suggested = evaluate(row['exam'], answers)
-    st.dataframe([{'항목': suggested[key]['rubric_title'], '예비 점수': suggested[key]['score'], '확정 점수': old.get(key, {}).get('score'), '만점': suggested[key]['max_score'], '적용한 구간': suggested[key]['rubric_descriptor']}
+    st.dataframe([{'항목': suggested[key]['rubric_title'], '자동 점수': suggested[key]['score'], '확정 점수': old.get(key, {}).get('score'), '만점': suggested[key]['max_score'], '적용한 구간': suggested[key]['rubric_descriptor']}
                   for key in RUBRICS[row['exam']]], hide_index=True)
     with st.form(f"review-{row['exam']}-{row['student']}"):
         review = {}
@@ -291,14 +297,15 @@ def show_attempt(number, attempt, round_number):
         st.text(attempt['answers'][key])
         st.write(item['status'])
         if key != 'event':
-            if item['score'] is None:
-                st.warning('점수 보류 · ' + item['score_feedback'])
-            else:
-                st.info(f"{item['score']} / {item['max_score']}점 · " + item['score_feedback'])
+            st.info(f"{item['score']} / {item['max_score']}점 · " + item['score_feedback'])
         st.info(item['feedback'])
+        show_spelling(item)
+        if key != 'event':
+            st.write('적용 기준: ' + item['rubric_descriptor'])
+            st.caption(item.get('decision_reason', ''))
         source = resolve_source(exam, key, item.get('source'))
         st.caption(f"피드백 근거: {source['file']} · PDF {', '.join(map(str, source['pages']))}쪽")
-    st.caption('기존 루브릭에 따른 규칙 기반 예비 채점입니다. 문맥 검토가 필요한 점수는 보류하며 교사가 최종 확정합니다.')
+    st.caption('루브릭의 서술 요소와 사실관계로 자동 채점했습니다. 오타는 보정하여 판단하며 원문을 보존합니다.')
 
 
 def show_comparison(attempts, complete=False):
@@ -310,17 +317,23 @@ def show_comparison(attempts, complete=False):
     second = [r['2차 점수'] for r in records]
     if complete and len(records) == len(QUESTIONS):
         cols = st.columns(3)
-        cols[0].metric('1차 총점', '검토 대기' if None in first else f'{sum(first)} / 36')
-        cols[1].metric('최종 학습 점수 · 2차', '검토 대기' if None in second else f'{sum(second)} / 36')
-        delta = None if None in first or None in second else sum(second) - sum(first)
-        cols[2].metric('1차 대비 변화', '검토 대기' if delta is None else f'{delta:+}점')
-    st.caption('공통 1번을 한 번만 합산한 36점 만점입니다. 교사 확정 전에는 예비 점수입니다. 보류 점수는 0점으로 계산하지 않습니다.')
+        cols[0].metric('1차 총점', f'{sum(first)} / 36')
+        cols[1].metric('최종 학습 점수 · 2차', f'{sum(second)} / 36')
+        delta = sum(second) - sum(first)
+        cols[2].metric('1차 대비 변화', f'{delta:+}점')
+    st.caption('공통 1번을 한 번만 합산한 36점 만점입니다. 1·2차 답안 모두 같은 최신 루브릭 규칙으로 자동 채점하여 비교합니다.')
     st.dataframe(records, hide_index=True)
     import pandas as pd
     chart = pd.DataFrame(records).set_index('문제')[['1차 점수', '2차 점수']]
-    st.bar_chart(chart, stack=False, y_label='루브릭 점수')
-    if any(value is None for value in first + second):
-        st.warning('보류된 점수는 그래프에서 생략했습니다. 보류 항목이 있으면 총점과 향상 점수도 확정하지 않습니다.')
+    import altair as alt
+    series = chart.reset_index().melt(id_vars='문제', var_name='채점 차수', value_name='루브릭 점수')
+    plot = alt.Chart(series).mark_line(point=True).encode(
+        x=alt.X('문제:O', sort=[r['문제'] for r in records], title='문제'),
+        y=alt.Y('루브릭 점수:Q', scale=alt.Scale(zero=True), title='루브릭 점수'),
+        color=alt.Color('채점 차수:N', title='채점 차수'),
+        tooltip=['문제', '채점 차수', '루브릭 점수'],
+    )
+    st.altair_chart(plot, width='stretch')
 
 
 preview = identity['role'] == '체험'
@@ -328,6 +341,9 @@ if preview:
     st.info('체험 모드 · 실제 응시 횟수에 반영되지 않습니다.')
 rows = {exam: (st.session_state.get(f'demo-{exam}') if preview else store.get(exam, identity['id'])) for exam in EXAMS}
 attempts = st.session_state.setdefault('demo-attempts', {}) if preview else store.attempts(identity['id'])
+attempts = refresh_attempts(attempts)
+if preview:
+    st.session_state['demo-attempts'] = attempts
 pending = [exam for exam, row in rows.items() if not row]
 needed = [n for n, (_, exam, _, _) in enumerate(QUESTIONS, 1)
           if exam in pending and (n != 1 or not any(rows.values()))]

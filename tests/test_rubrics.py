@@ -65,13 +65,13 @@ class RubricTests(unittest.TestCase):
                 self.assertEqual(actual['score'], expected)
                 self.assertEqual(actual['score_feedback'], band_feedback(exam, key, expected))
 
-    def test_joint_first_question_and_abstention(self):
+    def test_joint_first_question_and_automatic_partial_scores(self):
         result = evaluate('industry', {'event': '산업혁명', 'production': '가내 수공업에서 공장제 기계공업으로 바뀌어 면직물 생산량이 증가했다.'})
         self.assertEqual(result['event']['score'], 0)
         self.assertEqual(result['production']['score'], 4)
-        self.assertIsNone(score_answer('industry', 'production', {'production': '산업혁명으로 공장제 생산이 시작했으나 면직물은 증가하지 않았다.'})['score'])
-        self.assertIsNone(score_answer('imperialism', 'africa', {'africa': '영국의 횡단정책으로 우리 땅이 침략당했다.'})['score'])
-        self.assertIsNone(score_answer('industry', 'production', {'production': '면직물 생산량이 증가했다.'})['score'])
+        self.assertEqual(score_answer('industry', 'production', {'production': '산업혁명으로 공장제 생산이 시작했으나 면직물은 증가하지 않았다.'})['score'], 1)
+        self.assertEqual(score_answer('imperialism', 'africa', {'africa': '영국의 횡단정책으로 우리 땅이 침략당했다.'})['score'], 4)
+        self.assertEqual(score_answer('industry', 'production', {'production': '면직물 생산량이 증가했다.'})['score'], 1)
         self.assertEqual(score_answer('imperialism', 'rhodes', {'rhodes': '실업 해결과 새 식민지를 확보하기 위해 정책을 추진했다.'})['score'], 4)
 
     def test_excel_export_preserves_scores_and_untrusted_answer_as_text(self):

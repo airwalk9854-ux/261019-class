@@ -2,6 +2,7 @@
 from answer_matching import contains, event_is_correct
 from feedback_content import FACTS, CRITERIA, source_for
 from rubrics import score_answer
+from spelling import check_spelling
 
 EXAMS = {
     'industry': {
@@ -29,19 +30,21 @@ EXAMS = {
 }
 
 def evaluate(exam_id, answers):
-    """Provide source-based guidance and provisional discrete rubric scores."""
+    """Provide source-based guidance and automatic discrete rubric scores."""
+    corrected = {key: check_spelling(value)[0] for key, value in answers.items()}
     result = {}
     for key, _, kind, points, _ in EXAMS[exam_id]['questions']:
-        text = answers.get(key, '').strip()
+        text = corrected.get(key, '').strip()
+        _, spelling = check_spelling(answers.get(key, ''))
         if key == 'event':
             correct = event_is_correct(text)
-            result[key] = {'status': '정답' if correct else '오답 · 교사 확인 가능', 'feedback': FACTS[key], 'source': source_for(exam_id, key), 'score': 0}
+            result[key] = {'status': '정답' if correct else '오답', 'feedback': FACTS[key], 'source': source_for(exam_id, key), 'score': 0, 'spelling': spelling}
             continue
-        graded = score_answer(exam_id, key, answers)
+        graded = score_answer(exam_id, key, corrected)
         checks = graded['criteria_checks']
-        status = '관련 개념 확인 · 교사 검토 대기' if all(checks) else '보완 필요 · 교사 검토 대기'
+        status = '루브릭 기준 충족' if graded['score'] == graded['max_score'] else '루브릭 부분 충족 · 보완 필요'
         if not text:
-            status = '미작성 · 교사 검토 대기'
+            status = '미작성 · 루브릭 최저 구간 적용'
         fact_key = key
         if key == 'positive':
             rail, exhibition = contains(text, '철도', '기차'), contains(text, '박람회')
@@ -53,12 +56,10 @@ def evaluate(exam_id, answers):
             if labour != environment:
                 fact_key = 'negative_labour' if labour else 'negative_environment'
         missing = [label for label, matched in zip(CRITERIA[key], checks) if not matched]
-        guidance = ('관련 표현이 확인되었습니다. 자료 해석과 인과관계의 타당성은 선생님이 최종 확인합니다.'
+        guidance = ('루브릭에 해당하는 표현이 확인되었습니다. 적용된 기준과 자료의 인과관계를 함께 확인해 보세요.'
                     if not missing else '보완할 부분: ' + ', '.join(missing) + '. 자료의 근거와 연결하여 살펴보세요.')
         feedback = FACTS[fact_key] + ' ' + guidance
-        # Negation and contradictions require human reading, regardless of keywords.
         if graded['context_required']:
-            status = '문맥 확인 필요 · 교사 검토 대기'
-            feedback += ' 부정 표현이나 변화 방향은 문맥에 따라 의미가 달라지므로 선생님의 확인이 필요합니다.'
-        result[key] = {**graded, 'status': status, 'feedback': feedback, 'source': source_for(exam_id, key)}
+            feedback += ' 부정된 사실이나 잘못된 정책 연결은 점수 근거에서 제외했습니다. 사실관계와 변화 방향을 확인해 보세요.'
+        result[key] = {**graded, 'spelling': spelling, 'status': status, 'feedback': feedback, 'source': source_for(exam_id, key)}
     return result

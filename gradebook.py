@@ -10,9 +10,9 @@ def export_workbook(submissions):
     wb = Workbook()
     summary = wb.active
     summary.title = '학생별 성적'
-    summary.append(['평가', '학생 아이디', '이름', '예비 합계', '미확정 항목 수', '교사 확정 합계', '만점', '제출 시각(UTC)'])
+    summary.append(['평가', '학생 아이디', '이름', '자동 채점 합계', '미확정 항목 수', '교사 확정 합계', '만점', '제출 시각(UTC)'])
     details = wb.create_sheet('문항별 평가')
-    details.append(['평가', '학생 아이디', '이름', '문항', '답안', '예비 점수', '교사 확정 점수', '만점', '점수 구간 기준', '점수별 피드백', '역사적 사실 피드백', '근거 자료', '교사 추가 피드백'])
+    details.append(['평가', '학생 아이디', '이름', '문항', '답안', '자동 점수', '교사 확정 점수', '만점', '점수 구간 기준', '점수별 피드백', '역사적 사실 피드백', '근거 자료', '교사 추가 피드백'])
     for row in submissions:
         exam = row['exam']
         answers = json.loads(row['answers'])
@@ -41,7 +41,7 @@ def export_workbook(submissions):
             sheet.append(list(record.values()))
     note = wb.create_sheet('운영 안내')
     note.append(['항목', '설명'])
-    note.append(['자동 점수', '규칙 기반 예비 점수입니다. 문맥 확인이 필요한 항목은 공란입니다. 교사가 최종 확정합니다.'])
+    note.append(['자동 점수', '규칙 기반 자동 점수입니다. 문맥 확인이 필요한 항목은 공란입니다. 교사가 최종 확정합니다.'])
     note.append(['1번 문항', '1-①과 1-② 답안을 합쳐 4점으로 채점합니다. 별도 가산하지 않습니다.'])
     note.append(['최저 점수', '원본 표의 최저 점수는 항목당 1점입니다. 0점을 새로 만들지 않았습니다.'])
     note.append(['표기 차이', '문항2 마지막 항목 원본은 영국 횡단정책으로 표기. 피드백 내용.pdf 4~5쪽에 따라 종단정책 적용.'])

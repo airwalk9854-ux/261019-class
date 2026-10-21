@@ -1,12 +1,13 @@
 """Scoring bands transcribed/summarized from the two uploaded rubric tables.
 
-Descriptors and matched text are teacher-only. Student feedback does not supply
-missing event/policy/incident names or reproduce the model responses.
+Descriptors and matched evidence explain automatic scoring. Learning feedback
+does not reproduce the model responses.
 """
 import re
-from answer_matching import normalized, matching_terms, needs_context
+from answer_matching import normalized, matching_terms, needs_context, affirmed_text, event_is_correct
+from spelling import check_spelling
 
-VERSION = 'rubric-pdf-v2-paraphrases'
+VERSION = 'rubric-pdf-v3-automatic-spelling'
 COMMON = {
     4: ('사건 명칭·생산 방식 전환·면직물 생산 증가를 모두 설명', '사건과 생산 방식, 생산량의 관계를 함께 설명했습니다. 자료와 인과관계가 자연스럽게 연결되는지 확인하세요.'),
     3: ('생산 방식 전환과 생산 증가를 설명하나 사건 명칭이 없음', '생산 방식과 생산량의 변화를 연결했습니다. 변화가 일어난 역사적 사건의 명칭을 확인해 보세요.'),
@@ -70,9 +71,10 @@ def rubric_rows(exam):
             for score, (description, feedback) in levels.items()]
 
 def score_answer(exam, key, answers):
-    text = answers.get(key, '').strip()
-    combined = (answers.get('event', '') + ' ' + text) if key == 'production' else text
-    compact = normalized(combined)
+    text, _ = check_spelling(answers.get(key, '').strip())
+    event_text, _ = check_spelling(answers.get('event', ''))
+    combined = (event_text + ' ' + text) if key == 'production' else text
+    compact = affirmed_text(combined)
     evidence = []
 
     def has(label, *terms):
@@ -81,24 +83,30 @@ def score_answer(exam, key, answers):
             evidence.append(f'{label}: ' + ', '.join(matches))
         return bool(matches)
 
-    # A rule engine cannot safely interpret negation, reversed attribution, or
-    # contradictory context. It abstains instead of awarding a high band.
+    # Score only affirmed evidence; explain contradictions without abstaining.
     ambiguous = needs_context(combined, key)
     reason = ''
     score = None
     checks = []
     if key == 'production':
         event = has('사건 명칭', '산업혁명', 'industrialrevolution')
+        if event_text.strip():
+            event = event_is_correct(event_text)
         transition = has('이전 생산 방식', '가내수공업', '수공업') and has('이후 생산 방식', '공장제', '기계공업', '공장')
         product = has('생산물', '면직물', '직물', '옷감')
         increase = has('생산 증가', '증가', '늘어', '늘었', '많아', '대량생산', '급증')
+        if re.search(r'감소|줄어|줄었|증가대신', compact):
+            increase = False
+        if re.search(r'(?:공장제|기계공업|공장)[가-힣]{0,8}에서[가-힣]{0,8}(?:가내수공업|수공업)', compact):
+            transition = False
         growth = product and increase
         checks = [product, increase, transition]
         if transition and growth:
             score = 4 if event else 3
         elif event and transition:
             score = 2
-        elif not any([event, transition, growth]):
+        else:
+            # Without a supported transition, no higher COMMON band is met.
             score = 1
     elif key == 'positive':
         exhibition = has('박람회', '박람회')
@@ -153,7 +161,8 @@ def score_answer(exam, key, answers):
             score = 6
         elif positive and labour:
             score = 4
-        elif critical and not positive:
+        elif critical:
+            # Retain critical-content credit when higher combined bands fail.
             score = 3
         elif positive and not critical:
             score = 2
@@ -176,7 +185,8 @@ def score_answer(exam, key, answers):
         checks = [policy, incident, viewpoint]
         if policy and incident and viewpoint:
             score = 4
-        elif policy != incident:
+        elif policy or incident:
+            # Named facts earn partial credit; full credit also needs viewpoint.
             score = 3
         elif not policy and not incident:
             score = 2 if imperial else 1
@@ -188,17 +198,18 @@ def score_answer(exam, key, answers):
         checks = [policy, viewpoint, critical]
         score = 6 if policy and viewpoint and critical else 4 if partial or critical else 1
 
+    reason = '확인된 서술 요소에 따라 충족하는 루브릭 구간을 적용했습니다.'
     if ambiguous:
-        score = None
-        reason = '부정 표현·반대 방향의 변화가 포함되어 문맥 확인이 필요합니다.'
-    elif score is None:
-        reason = '서술 요소의 조합이 원본 점수 구간에 명확히 대응하지 않아 교사 확인이 필요합니다.'
+        reason += ' 사실을 부정하거나 정책의 국가를 잘못 연결한 표현은 해당 기준의 근거로 인정하지 않았습니다.'
+    if score is None:
+        score = min(bands(exam, key))
     return {
         'score': score, 'max_score': max(bands(exam, key)),
         'rubric_title': RUBRICS[exam][key][0],
-        'rubric_descriptor': bands(exam, key)[score][0] if score is not None else reason,
-        'score_feedback': band_feedback(exam, key, score) if score is not None else '문맥과 자료 근거를 확인한 뒤 선생님이 해당 점수 구간을 결정합니다.',
-        'evidence': evidence, 'needs_review': True,
+        'rubric_descriptor': bands(exam, key)[score][0],
+        'decision_reason': reason,
+        'score_feedback': band_feedback(exam, key, score),
+        'evidence': evidence, 'needs_review': False,
         'criteria_checks': checks, 'context_required': ambiguous,
         'rubric_source': {'file': f"논술형 문항{1 if exam == 'industry' else 2} 답안.pdf", 'pages': [1], 'version': VERSION},
     }

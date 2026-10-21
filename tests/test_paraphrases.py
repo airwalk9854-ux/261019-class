@@ -36,8 +36,8 @@ class ParaphraseTests(unittest.TestCase):
         criticism = '박람회는 산업 발전을 과시했지만 식민지 전시장은 식민지 주민의 착취를 보여주므로 정당화할 수 없다.'
         self.assertEqual(score_answer('industry', 'critique', {'critique': criticism})['score'], 8)
         negative_fact = '인터뷰에서 아동 노동 착취는 없었다고 했다.'
-        self.assertIsNone(score_answer('industry', 'negative', {'negative': negative_fact})['score'])
+        self.assertEqual(score_answer('industry', 'negative', {'negative': negative_fact})['score'], 1)
         wrong_growth = '산업혁명으로 수공업에서 공장제 생산으로 바뀌었지만 면직물 생산량이 늘지 않았다.'
-        self.assertIsNone(score_answer('industry', 'production', {'production': wrong_growth})['score'])
+        self.assertEqual(score_answer('industry', 'production', {'production': wrong_growth})['score'], 2)
         wrong_attribution = '우리 프랑스의 종단정책과 파쇼다 사건은 연결된다.'
-        self.assertIsNone(score_answer('imperialism', 'france', {'france': wrong_attribution})['score'])
+        self.assertEqual(score_answer('imperialism', 'france', {'france': wrong_attribution})['score'], 3)

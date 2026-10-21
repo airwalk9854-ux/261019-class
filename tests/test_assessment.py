@@ -47,7 +47,7 @@ class AssessmentTests(unittest.TestCase):
         self.assertFalse(verify_password('secret', 'invalid'))
         self.assertEqual(evaluate('industry', {'event': '산업 혁명'})['event']['status'], '정답')
         self.assertNotEqual(evaluate('industry', {'event': '산업혁명이 아니다'})['event']['status'], '정답')
-        self.assertIn('문맥 확인', evaluate('industry', {'production': '기계 공장 면직물 생산량이 증가하지 않았다'})['production']['status'])
+        self.assertEqual(evaluate('industry', {'production': '기계 공장 면직물 생산량이 증가하지 않았다'})['production']['score'], 1)
 
     def test_simultaneous_submissions(self):
         store = Store(self.path)
@@ -208,6 +208,24 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(app.text_input[0].value, '')
         self.assertEqual(app.text_area[0].value, '')
 
+    def test_typo_feedback_and_line_chart_render(self):
+        app = self.app()
+        button(app, '체험 시작').click().run()
+        app.text_input[0].set_value('산업혁멍')
+        app.text_area[0].set_value('가내수공업에서 공장제로 바뀌어 면직믈 생산량이 증가했다.')
+        button(app, '이 문제 제출하고 피드백 보기').click().run()
+        self.assertFalse(app.exception)
+        self.assertTrue(any('산업혁멍 → 산업혁명' in w.value for w in app.warning))
+        self.assertTrue(any('면직믈 → 면직물' in w.value for w in app.warning))
+        self.assertEqual(app.text_input[0].value, '산업혁멍')
+        button(app, '수정 답안 제출하고 2차 채점').click().run()
+        self.assertFalse(app.exception)
+        chart = app.get('vega_lite_chart')[0]
+        spec = json.loads(chart.proto.spec)
+        self.assertEqual(spec['mark']['type'], 'line')
+        self.assertTrue(spec['mark']['point'])
+        self.assertFalse(any('보류' in w.value for w in app.warning))
+
     def test_question_attempts_resume_and_enforce_round_order(self):
         store = Store(self.path)
         answer = {'event': '산업혁명', 'production': '공장제 기계공업으로 면직물 생산량 증가'}
@@ -230,13 +248,13 @@ class AssessmentTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertTrue(any('2번.' in h.value for h in app.header))
 
-    def test_comparison_does_not_replace_pending_scores_with_zero(self):
+    def test_comparison_automatically_scores_previously_pending_answers(self):
         from learning import grade_question, comparison
         first = grade_question(1, {'event': '산업혁명', 'production': '모르겠습니다'})
         second = grade_question(1, {'event': '산업혁명', 'production': '기계와 공장으로 면직물 생산량이 증가하지 않았다'})
         records = comparison({(1, 1): first, (1, 2): second})
-        self.assertIsNone(records[0]['2차 점수'])
-        self.assertIsNone(records[0]['변화'])
+        self.assertEqual(records[0]['2차 점수'], 1)
+        self.assertEqual(records[0]['변화'], 0)
 
     def test_complete_score_comparison_counts_common_question_once(self):
         from learning import grade_question, comparison
