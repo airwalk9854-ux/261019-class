@@ -178,7 +178,7 @@ with st.sidebar:
 
 **⑤ 최종 점수와 변화 확인**
 
-모든 문제를 마치면 최종 학습 점수와 1·2차 점수 차이, 문제별 비교 그래프를 볼 수 있습니다.
+모든 문제를 마치면 최종 학습 점수와 1·2차 총점의 차이를 확인하고, 두 차수의 총점을 연결한 선그래프로 점수 변화를 볼 수 있습니다.
 """)
     with st.expander('답안 저장과 점수 안내'):
         st.markdown("""
@@ -308,30 +308,30 @@ def show_attempt(number, attempt, round_number):
     st.caption('루브릭의 서술 요소와 사실관계로 자동 채점했습니다. 오타는 보정하여 판단하며 원문을 보존합니다.')
 
 
-def show_comparison(attempts, complete=False):
+def show_final_comparison(attempts):
     records = comparison(attempts)
     if not records:
         return
-    st.subheader('전체 학습 결과' if complete else '문제별 점수 변화')
-    first = [r['1차 점수'] for r in records]
-    second = [r['2차 점수'] for r in records]
-    if complete and len(records) == len(QUESTIONS):
-        cols = st.columns(3)
-        cols[0].metric('1차 총점', f'{sum(first)} / 36')
-        cols[1].metric('최종 학습 점수 · 2차', f'{sum(second)} / 36')
-        delta = sum(second) - sum(first)
-        cols[2].metric('1차 대비 변화', f'{delta:+}점')
-    st.caption('공통 1번을 한 번만 합산한 36점 만점입니다. 1·2차 답안 모두 같은 최신 루브릭 규칙으로 자동 채점하여 비교합니다.')
+    st.subheader('전체 학습 결과')
     st.dataframe(records, hide_index=True)
-    import pandas as pd
-    chart = pd.DataFrame(records).set_index('문제')[['1차 점수', '2차 점수']]
+    if len(records) != len(QUESTIONS):
+        return
+    first_total = sum(r['1차 점수'] for r in records)
+    second_total = sum(r['2차 점수'] for r in records)
+    cols = st.columns(3)
+    cols[0].metric('1차 총점', f'{first_total} / 36')
+    cols[1].metric('최종 학습 점수 · 2차', f'{second_total} / 36')
+    cols[2].metric('1차 대비 변화', f'{second_total - first_total:+}점')
+    st.caption('공통 1번을 한 번만 합산한 36점 만점입니다. 1·2차 답안 모두 같은 최신 루브릭 규칙으로 자동 채점하여 비교합니다.')
     import altair as alt
-    series = chart.reset_index().melt(id_vars='문제', var_name='채점 차수', value_name='루브릭 점수')
+    series = alt.Data(values=[
+        {'채점 차수': '1차', '총점': first_total},
+        {'채점 차수': '2차', '총점': second_total},
+    ])
     plot = alt.Chart(series).mark_line(point=True).encode(
-        x=alt.X('문제:O', sort=[r['문제'] for r in records], title='문제'),
-        y=alt.Y('루브릭 점수:Q', scale=alt.Scale(zero=True), title='루브릭 점수'),
-        color=alt.Color('채점 차수:N', title='채점 차수'),
-        tooltip=['문제', '채점 차수', '루브릭 점수'],
+        x=alt.X('채점 차수:O', sort=['1차', '2차'], title='채점 차수'),
+        y=alt.Y('총점:Q', scale=alt.Scale(domain=[0, 36]), title='총점 (36점 만점)'),
+        tooltip=['채점 차수:O', '총점:Q'],
     )
     st.altair_chart(plot, width='stretch')
 
@@ -352,7 +352,7 @@ current = next((n for n in needed if (n, 2) not in attempts), None)
 if not pending:
     st.header('최종 결과')
     st.success('모든 문제의 풀이와 채점이 완료되었습니다.')
-    show_comparison(attempts, complete=True)
+    show_final_comparison(attempts)
     if len(comparison(attempts)) < len(QUESTIONS):
         st.info('이전 방식으로 제출한 평가에는 1·2차 기록이 없어 전체 향상 점수를 계산할 수 없습니다.')
     for exam, row in rows.items():
@@ -391,7 +391,6 @@ if first:
     show_attempt(number, first, 1)
 if second:
     show_attempt(number, second, 2)
-    show_comparison(attempts)
     st.button('다음 문제 →', on_click=move_question, args=(current,), type='primary')
 else:
     round_number = 2 if first else 1

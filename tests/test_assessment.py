@@ -193,7 +193,9 @@ class AssessmentTests(unittest.TestCase):
             button(app, '수정 답안 제출하고 2차 채점').click().run()
             self.assertFalse(app.exception)
             if number < 7:
+                self.assertFalse(app.get('vega_lite_chart'))
                 button(app, '다음 문제 →').click().run()
+                self.assertFalse(app.get('vega_lite_chart'))
         self.assertTrue(app.success)
         self.assertEqual(Store(self.path).all(), [])
         attempts = app.session_state['demo-attempts']
@@ -203,12 +205,28 @@ class AssessmentTests(unittest.TestCase):
         imperialism = json.loads(app.session_state['demo-imperialism']['answers'])
         self.assertEqual(industry['production'], imperialism['production'])
         self.assertEqual(industry['event'], imperialism['event'])
-        self.assertTrue(any('vega' in str(e.type) for e in app))
+        charts = app.get('vega_lite_chart')
+        self.assertEqual(len(charts), 1)
+        spec = json.loads(charts[0].proto.spec)
+        self.assertEqual(spec['mark']['type'], 'line')
+        self.assertTrue(spec['mark']['point'])
+        self.assertEqual(spec['encoding']['x']['field'], '채점 차수')
+        self.assertEqual(spec['encoding']['x']['sort'], ['1차', '2차'])
+        self.assertEqual(spec['encoding']['y']['field'], '총점')
+        self.assertEqual(spec['encoding']['y']['scale']['domain'], [0, 36])
+        from learning import comparison
+        records = comparison(attempts)
+        import pyarrow as pa
+        chart_values = pa.ipc.open_stream(charts[0].proto.data.data).read_all().to_pylist()
+        self.assertEqual(chart_values, [
+            {'채점 차수': '1차', '총점': sum(r['1차 점수'] for r in records)},
+            {'채점 차수': '2차', '총점': sum(r['2차 점수'] for r in records)},
+        ])
         button(app, '체험 다시 시작').click().run()
         self.assertEqual(app.text_input[0].value, '')
         self.assertEqual(app.text_area[0].value, '')
 
-    def test_typo_feedback_and_line_chart_render(self):
+    def test_typo_feedback_without_intermediate_chart(self):
         app = self.app()
         button(app, '체험 시작').click().run()
         app.text_input[0].set_value('산업혁멍')
@@ -220,10 +238,7 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(app.text_input[0].value, '산업혁멍')
         button(app, '수정 답안 제출하고 2차 채점').click().run()
         self.assertFalse(app.exception)
-        chart = app.get('vega_lite_chart')[0]
-        spec = json.loads(chart.proto.spec)
-        self.assertEqual(spec['mark']['type'], 'line')
-        self.assertTrue(spec['mark']['point'])
+        self.assertFalse(app.get('vega_lite_chart'))
         self.assertFalse(any('보류' in w.value for w in app.warning))
 
     def test_question_attempts_resume_and_enforce_round_order(self):

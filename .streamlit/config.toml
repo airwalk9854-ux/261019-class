@@ -6,4 +6,6 @@ textColor = "#233b36"
 font = "sans serif"
 
 [server]
+# Polling reliably detects local module changes on mounted workspaces.
+fileWatcherType = "poll"
 enableStaticServing = false
