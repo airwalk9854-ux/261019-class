@@ -132,21 +132,26 @@ class AssessmentTests(unittest.TestCase):
         button(app, '로그인').click().run()
         self.assertFalse(app.exception)
         self.assertEqual(len(app.get('image')), 2)
-        # Empty submission is refused, then all answers are supplied.
-        button(app, '최종 제출하고 피드백 보기').click().run()
+        # Each question must be graded twice before the next opens.
+        button(app, '이 문제 제출하고 피드백 보기').click().run()
         self.assertTrue(app.error)
-        app.text_input[0].set_value('산업혁명')
-        for text in app.text_area:
-            text.set_value('공장과 기계의 발전, 면직물 생산 증가에 관한 자료 근거입니다.')
-        app.run()
-        for number in range(2, 8):
-            app.sidebar.radio[0].set_value(number).run()
-            app.text_area[0].set_value('공장과 기계의 발전, 면직물 생산 증가에 관한 자료 근거입니다.').run()
-        app.checkbox[0].check()
-        button(app, '최종 제출하고 피드백 보기').click().run()
-        self.assertFalse(app.exception)
+        for number in range(1, 8):
+            if number == 1:
+                app.text_input[0].set_value('산업혁명')
+            for text in app.text_area:
+                text.set_value('공장과 기계의 발전, 면직물 생산 증가에 관한 자료 근거입니다.')
+            button(app, '이 문제 제출하고 피드백 보기').click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any('1차 채점' in item.value for item in app.subheader))
+            app.text_area[0].set_value('공장제 기계공업으로 면직물 생산량이 증가했다.')
+            button(app, '수정 답안 제출하고 2차 채점').click().run()
+            self.assertFalse(app.exception)
+            if number < 7:
+                button(app, '다음 문제 →').click().run()
         self.assertTrue(app.success)
         self.assertEqual(len(Store(self.path).all()), 2)
+        self.assertEqual(len(Store(self.path).attempts('s1')), 14)
+        self.assertTrue(any(m.label == '최종 학습 점수 · 2차' for m in app.metric))
         button(app, '로그아웃').click().run()
         app.radio[0].set_value('교사')
         app.text_input[1].set_value('teacher-password')
@@ -171,35 +176,104 @@ class AssessmentTests(unittest.TestCase):
         self.assertFalse(app.text_area)
         self.assertTrue(any('교사 확정 점수' in m.label for m in app.metric))
 
-    def test_navigation_preserves_answers_and_demo_does_not_persist(self):
+    def test_sequential_demo_revision_and_reset(self):
         app = self.app()
         button(app, '체험 시작').click().run()
-        self.assertFalse(app.selectbox)  # All questions share one continuous menu.
-        self.assertEqual(len(app.sidebar.radio[0].options), 7)
-        app.text_input[0].set_value('산업혁명')
-        app.text_area[0].set_value('기계와 공장으로 생산 방식이 변하고 면직물 생산량이 증가했다.').run()
-        for number in range(2, 8):
-            app.sidebar.radio[0].set_value(number).run()
+        self.assertEqual(len(app.sidebar.radio[0].options), 1)
+        for number in range(1, 8):
+            if number == 1:
+                app.text_input[0].set_value('산업혁명')
+            original = f'{number}번 자료를 바탕으로 작성한 체험 답안입니다.'
+            app.text_area[0].set_value(original)
+            button(app, '이 문제 제출하고 피드백 보기').click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(len(app.text_area), 1)
-            app.text_area[0].set_value(f'{number}번 자료를 바탕으로 작성한 체험 답안입니다.').run()
-        button(app, '← 이전 문제').click().run()
-        self.assertEqual(app.text_area[0].value, '6번 자료를 바탕으로 작성한 체험 답안입니다.')
-        app.sidebar.radio[0].set_value(1).run()
-        self.assertEqual(app.text_input[0].value, '산업혁명')
-        self.assertIn('면직물', app.text_area[0].value)
-        app.checkbox[0].check()
-        button(app, '최종 제출하고 피드백 보기').click().run()
-        self.assertFalse(app.exception)
+            self.assertEqual(app.text_area[0].value, original)
+            revised = '공장제 기계공업으로 면직물 생산량이 증가했다.'
+            app.text_area[0].set_value(revised)
+            button(app, '수정 답안 제출하고 2차 채점').click().run()
+            self.assertFalse(app.exception)
+            if number < 7:
+                button(app, '다음 문제 →').click().run()
         self.assertTrue(app.success)
         self.assertEqual(Store(self.path).all(), [])
+        attempts = app.session_state['demo-attempts']
+        self.assertEqual(attempts[1, 1]['answers']['production'], '1번 자료를 바탕으로 작성한 체험 답안입니다.')
+        self.assertEqual(attempts[1, 2]['answers']['production'], revised)
         industry = json.loads(app.session_state['demo-industry']['answers'])
         imperialism = json.loads(app.session_state['demo-imperialism']['answers'])
         self.assertEqual(industry['production'], imperialism['production'])
         self.assertEqual(industry['event'], imperialism['event'])
+        self.assertTrue(any('vega' in str(e.type) for e in app))
         button(app, '체험 다시 시작').click().run()
         self.assertEqual(app.text_input[0].value, '')
         self.assertEqual(app.text_area[0].value, '')
+
+    def test_question_attempts_resume_and_enforce_round_order(self):
+        store = Store(self.path)
+        answer = {'event': '산업혁명', 'production': '공장제 기계공업으로 면직물 생산량 증가'}
+        with self.assertRaises(ValueError):
+            store.submit_question('s1', '학생', 1, 2, answer)
+        with self.assertRaises(ValueError):
+            store.submit_question('s1', '학생', 2, 1, {'positive': '철도'})
+        store.submit_question('s1', '학생', 1, 1, answer)
+        resumed = Store(self.path)
+        before = resumed.attempts('s1')[1, 1]
+        self.assertEqual(before['answers'], answer)
+        self.assertEqual(resumed.attempts('s2'), {})
+        with self.assertRaises(sqlite3.IntegrityError):
+            resumed.submit_question('s1', '학생', 1, 1, answer)
+        resumed.submit_question('s1', '학생', 1, 2, {**answer, 'production': '기계로 훨씬 많이 생산'})
+        self.assertEqual(resumed.attempts('s1')[1, 1], before)
+        app = self.app()
+        app.session_state['identity'] = {'id': 's1', 'name': '학생', 'role': '학생'}
+        app.run()
+        self.assertFalse(app.exception)
+        self.assertTrue(any('2번.' in h.value for h in app.header))
+
+    def test_comparison_does_not_replace_pending_scores_with_zero(self):
+        from learning import grade_question, comparison
+        first = grade_question(1, {'event': '산업혁명', 'production': '모르겠습니다'})
+        second = grade_question(1, {'event': '산업혁명', 'production': '기계와 공장으로 면직물 생산량이 증가하지 않았다'})
+        records = comparison({(1, 1): first, (1, 2): second})
+        self.assertIsNone(records[0]['2차 점수'])
+        self.assertIsNone(records[0]['변화'])
+
+    def test_complete_score_comparison_counts_common_question_once(self):
+        from learning import grade_question, comparison
+        from question_content import QUESTIONS
+        best = [
+            {'event': '산업혁명', 'production': '가내 수공업에서 공장제 기계공업으로 변하여 면직물 생산량이 증가하였다.'},
+            {'positive': '철도로 생활 범위와 여가 활동이 확대되고 시간표를 통해 시간 개념이 생겼다.'},
+            {'negative': '인터뷰에 따르면 아동에 대한 노동 착취가 심각하였다.'},
+            {'critique': '박람회는 산업과 국력의 발전을 보여주지만 식민지 전시장은 식민지 주민의 착취를 보여 준다.'},
+            {'rhodes': '실업 문제 해결과 시장 확보를 위해 제국주의를 추진했고 많은 식민지를 확보하였다.'},
+            {'france': '우리 프랑스의 횡단정책이 영국과 파쇼다 사건에서 충돌하여 위협을 느꼈다.'},
+            {'africa': '영국의 종단정책으로 우리 땅을 빼앗겨 침략에 분노한다.'},
+        ]
+        store = Store(self.path)
+        for number, (_, _, keys, _) in enumerate(QUESTIONS, 1):
+            store.submit_question('s1', '학생', number, 1, {key: '모르겠습니다' for key in keys})
+            store.submit_question('s1', '학생', number, 2, best[number - 1])
+        records = comparison(store.attempts('s1'))
+        self.assertEqual(sum(r['1차 점수'] for r in records), 7)
+        self.assertEqual(sum(r['2차 점수'] for r in records), 36)
+        self.assertEqual(sum(r['변화'] for r in records), 29)
+        self.assertEqual(sum(r['만점'] for r in records), 36)
+        self.assertEqual(len(store.all()), 2)
+        reversed_records = comparison({(n, 3 - r): a for (n, r), a in store.attempts('s1').items()})
+        self.assertEqual(sum(r['변화'] for r in reversed_records), -29)
+
+    def test_legacy_submission_is_preserved_when_remaining_exam_completed(self):
+        store = Store(self.path)
+        common = {'event': '산업혁명', 'production': '가내 수공업에서 공장제 기계공업으로 면직물 생산량 증가'}
+        store.submit('industry', 's1', '학생', common, evaluate('industry', common))
+        before = store.get('industry', 's1')
+        for number, key in [(5, 'rhodes'), (6, 'france'), (7, 'africa')]:
+            for round_number in (1, 2):
+                store.submit_question('s1', '학생', number, round_number, {key: '모르겠습니다'})
+        self.assertEqual(store.get('industry', 's1'), before)
+        final = json.loads(store.get('imperialism', 's1')['answers'])
+        self.assertEqual(final['production'], common['production'])
 
     def test_unified_submission_rolls_back_on_duplicate(self):
         store = Store(self.path)

@@ -17,6 +17,7 @@ from rubrics import RUBRICS, bands, band_feedback, rubric_rows
 from gradebook import export_workbook
 from feedback_content import resolve_source
 from question_content import QUESTIONS, NEWS, RHODES, answers_for
+from learning import grade_question, comparison
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title='역사의 시선 | 서논술형 평가', page_icon='📜', layout='wide')
@@ -87,10 +88,6 @@ def show_materials(material):
         st.caption('출처: 원본 문항 PDF의 그림·기사·지도. 그림은 확대해서 볼 수 있습니다.')
 
 
-def save_draft(draft_key, widget_key):
-    st.session_state['drafts'][draft_key] = st.session_state[widget_key]
-
-
 def move_question(number):
     st.session_state['question_number'] = number
 
@@ -148,15 +145,43 @@ st.write('산업혁명과 제국주의 · 자료를 읽고 나의 언어로 설�
 
 with st.sidebar:
     st.markdown('### 📜 역사 탐구실')
-    st.caption('서논술형 평가 & 피드백')
+    st.caption('한 문제씩 배우는 서논술형 평가')
     if st.session_state.get('identity'):
         st.write(st.session_state['identity']['name'])
         if st.button('로그아웃', width='stretch'):
             st.session_state.clear()
             st.rerun()
     st.divider()
-    st.markdown('**응시 안내**\n\n① 자료를 살펴보세요.\n\n② 모든 답안을 작성하세요.\n\n③ 최종 제출 후 피드백을 확인하세요.')
-    st.caption('모든 문제를 작성한 뒤 최종 제출하세요.')
+    st.markdown("""
+### 학습 진행 안내
+
+**① 자료 읽고 첫 답안 작성**
+
+현재 문제의 자료를 읽고 나의 생각을 작성하세요.
+
+**② 1차 제출과 피드백 확인**
+
+‘이 문제 제출하고 피드백 보기’를 누르면 바로 채점 결과와 보완할 점을 확인할 수 있습니다.
+
+**③ 답안 수정과 2차 채점**
+
+피드백과 루브릭을 참고해 답안을 보완한 뒤 ‘수정 답안 제출하고 2차 채점’을 누르세요.
+
+**④ 다음 문제로 이동**
+
+2차 결과를 확인하고 ‘다음 문제 →’를 누르세요. 모든 문제를 같은 순서로 진행합니다.
+
+**⑤ 최종 점수와 변화 확인**
+
+모든 문제를 마치면 최종 학습 점수와 1·2차 점수 차이, 문제별 비교 그래프를 볼 수 있습니다.
+""")
+    with st.expander('답안 저장과 점수 안내'):
+        st.markdown("""
+- 제출한 1·2차 답안과 피드백은 각각 보관됩니다. 학생 계정은 재접속해도 이어서 진행할 수 있습니다.
+- 제출 전 입력은 새로고침이나 창 닫기 시 사라질 수 있습니다. 체험 기록은 현재 세션에서만 유지됩니다.
+- 전체 학습 점수는 공통 1번을 한 번만 합산한 **36점 만점**입니다.
+- 자동 채점은 루브릭에 따른 예비 결과이며, 교사가 최종 확정합니다. 문맥 검토가 필요한 점수와 관련 총점·향상 폭은 검토 대기로 표시합니다.
+""")
     question_menu = st.empty()
 
 if not st.session_state.get('identity'):
@@ -214,6 +239,14 @@ if identity['role'] == '교사':
     row = rows[selected]
     answers = json.loads(row['answers'])
     old = json.loads(row['review']) if row['review'] else {}
+    history = store.attempts(row['student'])
+    if history:
+        from learning import comparison
+        with st.expander('1·2차 답안과 점수 변화'):
+            st.dataframe(comparison(history), hide_index=True)
+            for (number, round_number), attempt in sorted(history.items()):
+                st.write(f'{number}번 · {round_number}차')
+                st.json(attempt['answers'])
     suggested = evaluate(row['exam'], answers)
     st.dataframe([{'항목': suggested[key]['rubric_title'], '예비 점수': suggested[key]['score'], '확정 점수': old.get(key, {}).get('score'), '만점': suggested[key]['max_score'], '적용한 구간': suggested[key]['rubric_descriptor']}
                   for key in RUBRICS[row['exam']]], hide_index=True)
@@ -250,111 +283,147 @@ if identity['role'] == '교사':
                 st.success('저장했습니다. 학생이 확정 점수와 해당 점수 구간의 피드백을 확인할 수 있습니다.')
     st.stop()
 
+def show_attempt(number, attempt, round_number):
+    _, exam, keys, _ = QUESTIONS[number - 1]
+    st.subheader(f'{round_number}차 채점과 피드백')
+    for key in keys:
+        item = attempt['result'][key]
+        st.text(attempt['answers'][key])
+        st.write(item['status'])
+        if key != 'event':
+            if item['score'] is None:
+                st.warning('점수 보류 · ' + item['score_feedback'])
+            else:
+                st.info(f"{item['score']} / {item['max_score']}점 · " + item['score_feedback'])
+        st.info(item['feedback'])
+        source = resolve_source(exam, key, item.get('source'))
+        st.caption(f"피드백 근거: {source['file']} · PDF {', '.join(map(str, source['pages']))}쪽")
+    st.caption('기존 루브릭에 따른 규칙 기반 예비 채점입니다. 문맥 검토가 필요한 점수는 보류하며 교사가 최종 확정합니다.')
+
+
+def show_comparison(attempts, complete=False):
+    records = comparison(attempts)
+    if not records:
+        return
+    st.subheader('전체 학습 결과' if complete else '문제별 점수 변화')
+    first = [r['1차 점수'] for r in records]
+    second = [r['2차 점수'] for r in records]
+    if complete and len(records) == len(QUESTIONS):
+        cols = st.columns(3)
+        cols[0].metric('1차 총점', '검토 대기' if None in first else f'{sum(first)} / 36')
+        cols[1].metric('최종 학습 점수 · 2차', '검토 대기' if None in second else f'{sum(second)} / 36')
+        delta = None if None in first or None in second else sum(second) - sum(first)
+        cols[2].metric('1차 대비 변화', '검토 대기' if delta is None else f'{delta:+}점')
+    st.caption('공통 1번을 한 번만 합산한 36점 만점입니다. 교사 확정 전에는 예비 점수입니다. 보류 점수는 0점으로 계산하지 않습니다.')
+    st.dataframe(records, hide_index=True)
+    import pandas as pd
+    chart = pd.DataFrame(records).set_index('문제')[['1차 점수', '2차 점수']]
+    st.bar_chart(chart, stack=False, y_label='루브릭 점수')
+    if any(value is None for value in first + second):
+        st.warning('보류된 점수는 그래프에서 생략했습니다. 보류 항목이 있으면 총점과 향상 점수도 확정하지 않습니다.')
+
+
 preview = identity['role'] == '체험'
 if preview:
     st.info('체험 모드 · 실제 응시 횟수에 반영되지 않습니다.')
-rows = {exam_id: (st.session_state.get(f'demo-{exam_id}') if preview else store.get(exam_id, identity['id']))
-        for exam_id in EXAMS}
-pending = [exam_id for exam_id, row in rows.items() if not row]
-if 'drafts' not in st.session_state:
-    st.session_state['drafts'] = {}
-    # Reuse the common answer when one original assessment was already submitted.
-    for row in rows.values():
-        if row:
-            for key, value in json.loads(row['answers']).items():
-                if key in ('event', 'production'):
-                    st.session_state['drafts'][f'industry:{key}'] = value
-            break
-    for e, row in rows.items():
-        if row:
-            for key, value in json.loads(row['answers']).items():
-                if key not in ('event', 'production'):
-                    st.session_state['drafts'][f'{e}:{key}'] = value
-drafts = st.session_state['drafts']
-
-with question_menu.container():
-    st.divider()
-    st.markdown('### 문제 선택')
-    number = st.radio('문제 번호', range(1, len(QUESTIONS) + 1),
-                      format_func=lambda n: f'{n}번 · {QUESTIONS[n-1][0]}',
-                      key='question_number', label_visibility='collapsed')
+rows = {exam: (st.session_state.get(f'demo-{exam}') if preview else store.get(exam, identity['id'])) for exam in EXAMS}
+attempts = st.session_state.setdefault('demo-attempts', {}) if preview else store.attempts(identity['id'])
+pending = [exam for exam, row in rows.items() if not row]
+needed = [n for n, (_, exam, _, _) in enumerate(QUESTIONS, 1)
+          if exam in pending and (n != 1 or not any(rows.values()))]
+current = next((n for n in needed if (n, 2) not in attempts), None)
 
 if not pending:
-    st.header('제출 결과')
-    for exam_id, row in rows.items():
-        with st.expander(EXAMS[exam_id]['title'], expanded=True):
-            show_results(exam_id, row, preview)
+    st.header('최종 결과')
+    st.success('모든 문제의 풀이와 채점이 완료되었습니다.')
+    show_comparison(attempts, complete=True)
+    if len(comparison(attempts)) < len(QUESTIONS):
+        st.info('이전 방식으로 제출한 평가에는 1·2차 기록이 없어 전체 향상 점수를 계산할 수 없습니다.')
+    for exam, row in rows.items():
+        with st.expander(EXAMS[exam]['title'] + ' · 원본별 20점 결과'):
+            show_results(exam, row, preview)
+    for n in range(1, len(QUESTIONS) + 1):
+        if (n, 2) in attempts:
+            with st.expander(f'{n}번 · 처음 답안과 수정 답안 비교'):
+                show_attempt(n, attempts[n, 1], 1)
+                show_attempt(n, attempts[n, 2], 2)
     if preview and st.button('체험 다시 시작'):
         for key in list(st.session_state):
-            if key.startswith(('demo-', 'draft-', 'answer-')) or key in ('drafts', 'question_number', 'confirm_submission'):
+            if key.startswith(('demo-', 'response-')) or key == 'question_number':
                 del st.session_state[key]
         st.rerun()
     st.stop()
 
-title, exam_id, keys, material = QUESTIONS[number - 1]
-common = number == 1
-locked = not pending if common else exam_id not in pending
-complete = sum(all(answers_for(e, drafts).get(k, '').strip() for k in question_keys)
-               for _, e, question_keys, _ in QUESTIONS)
+available = [n for n in needed if (n, 2) in attempts or n == current]
+if st.session_state.get('question_number') not in available:
+    st.session_state['question_number'] = current
+with question_menu.container():
+    st.markdown('### 문제별 학습 현황')
+    number = st.radio('문제 번호', available, key='question_number',
+                      format_func=lambda n: f"{n}번 · {QUESTIONS[n-1][0]}" + (' · 완료' if (n, 2) in attempts else ' · 진행 중'))
+    st.caption('현재 문제의 2차 채점 후 다음 문제가 열립니다. 완료한 문제를 선택하면 처음 답안과 수정 답안, 두 차수의 피드백을 다시 볼 수 있습니다.')
+
+title, exam, keys, material = QUESTIONS[number - 1]
+completed = sum((n, 2) in attempts for n in needed)
 st.header(f'{number}번. {title}')
-st.progress(complete / len(QUESTIONS), text=f'작성 완료 {complete} / {len(QUESTIONS)}문제')
+st.progress(completed / len(needed), text=f'2차 채점 완료 {completed} / {len(needed)}문제')
 show_materials(material)
 st.divider()
-st.subheader('나의 답안')
-if locked:
-    st.info('이미 제출한 문제입니다. 저장된 답안을 보여드립니다.')
-    saved = json.loads(rows[exam_id]['answers'])
-    for key, _, _, _, prompt in EXAMS[exam_id]['questions']:
-        if key in keys:
-            st.write(prompt)
-            st.text(saved.get(key, ''))
+first = attempts.get((number, 1))
+second = attempts.get((number, 2))
+if first:
+    show_attempt(number, first, 1)
+if second:
+    show_attempt(number, second, 2)
+    show_comparison(attempts)
+    st.button('다음 문제 →', on_click=move_question, args=(current,), type='primary')
 else:
-    st.caption('문제를 이동해도 작성한 답안은 유지됩니다. 창을 닫거나 새로고침하면 제출 전 답안이 사라질 수 있습니다.')
-    for key, _, kind, points, prompt in EXAMS[exam_id]['questions']:
+    round_number = 2 if first else 1
+    st.subheader('피드백을 반영한 수정 답안' if first else '나의 첫 답안')
+    if first:
+        st.caption('처음 답안을 불러왔습니다. 위 피드백과 점수 기준을 참고해 보완한 뒤 다시 제출하세요.')
+        with st.expander('이 문제의 루브릭 확인'):
+            titles = {RUBRICS[exam][key][0] for key in keys if key in RUBRICS[exam]}
+            st.dataframe([row for row in rubric_rows(exam) if row['평가 항목'] in titles], hide_index=True)
+    else:
+        st.caption('이 문제를 제출하면 바로 피드백을 받습니다. 제출한 1차 답안은 보존되며 수정은 2차 답안에서 합니다.')
+    answers = {}
+    for key, _, kind, points, prompt in EXAMS[exam]['questions']:
         if key not in keys:
             continue
         if key == 'production':
             prompt = '앞에서 쓴 사건과 연결하여 생산 방식과 면직물 생산량이 어떻게 변했는지 서술하세요.'
-        draft_key = f'{exam_id}:{key}'
-        widget_key = f'draft-{draft_key}'
-        label = prompt + (f' ({points}점)' if points else ' (아래 서술형과 합산 4점)')
-        if widget_key not in st.session_state:
-            st.session_state[widget_key] = drafts.get(draft_key, '')
-        options = dict(key=widget_key, on_change=save_draft, args=(draft_key, widget_key))
+        widget = f'response-{number}-{round_number}-{key}'
+        default = first['answers'][key] if first else ''
         if kind == '단답형':
-            st.text_input(label, max_chars=100, **options)
+            answers[key] = st.text_input(prompt, value=default, max_chars=100, key=widget)
         else:
-            st.text_area(label, height=220 if kind == '논술형' else 160, max_chars=5000, **options)
-
-previous, following = st.columns(2)
-previous.button('← 이전 문제', disabled=number == 1, on_click=move_question, args=(number - 1,), width='stretch')
-following.button('다음 문제 →', disabled=number == len(QUESTIONS), on_click=move_question, args=(number + 1,), width='stretch')
-st.divider()
-st.caption('1번은 두 원본 PDF의 공통 문제로 한 번만 작성합니다. 채점은 기존 기준에 따라 각 평가에 공통 답안을 반영하며, 원본별 20점을 유지합니다.')
-confirmed = st.checkbox('모든 답안을 확인했습니다. 최종 제출 후에는 수정하거나 다시 응시할 수 없음을 이해했습니다.', key='confirm_submission')
-if st.button('최종 제출하고 피드백 보기', type='primary', width='stretch'):
-    missing = [n for n, (_, e, question_keys, _) in enumerate(QUESTIONS, 1)
-               if (e in pending or n == 1) and any(not answers_for(e, drafts)[k].strip() for k in question_keys)]
-    if missing:
-        st.error('답안을 작성하지 않은 문제: ' + ', '.join(f'{n}번' for n in missing))
-    elif not confirmed:
-        st.error('제출 안내 확인란을 체크해 주세요.')
-    else:
-        submissions = {e: answers_for(e, drafts) for e in pending}
-        if preview:
-            for e, answers in submissions.items():
-                st.session_state[f'demo-{e}'] = {'answers': json.dumps(answers, ensure_ascii=False),
-                                                'result': json.dumps(evaluate(e, answers), ensure_ascii=False), 'review': None}
-        else:
-            try:
-                store.submit_many(identity['id'], identity['name'], submissions)
-            except sqlite3.IntegrityError:
-                st.warning('다른 화면에서 제출한 평가가 있습니다. 저장된 기록을 다시 확인합니다.')
-        st.rerun()
+            answers[key] = st.text_area(prompt, value=default, max_chars=5000, height=220, key=widget)
+    label = '수정 답안 제출하고 2차 채점' if first else '이 문제 제출하고 피드백 보기'
+    if st.button(label, type='primary', width='stretch'):
+        try:
+            payload = grade_question(number, answers)
+            if preview:
+                attempts[number, round_number] = payload
+                if all((n, 2) in attempts for n in needed):
+                    drafts = {}
+                    for n, (_, question_exam, _, _) in enumerate(QUESTIONS, 1):
+                        for key, value in attempts[n, 2]['answers'].items():
+                            drafts[f'{question_exam}:{key}'] = value
+                    for e in EXAMS:
+                        final = answers_for(e, drafts)
+                        st.session_state[f'demo-{e}'] = {'answers': json.dumps(final, ensure_ascii=False),
+                            'result': json.dumps(evaluate(e, final), ensure_ascii=False), 'review': None}
+            else:
+                store.submit_question(identity['id'], identity['name'], number, round_number, answers)
+            st.rerun()
+        except ValueError as error:
+            st.error(str(error))
+        except sqlite3.IntegrityError:
+            st.rerun()
 
 if any(rows.values()):
     with st.expander('기존에 제출한 평가 결과'):
         for e, row in rows.items():
             if row:
-                st.subheader(EXAMS[e]['title'])
                 show_results(e, row, preview)
