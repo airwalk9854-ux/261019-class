@@ -7,7 +7,7 @@ import re
 from answer_matching import normalized, matching_terms, needs_context, affirmed_text, event_is_correct
 from spelling import check_spelling
 
-VERSION = 'rubric-pdf-v4-revised-industry-rail'
+VERSION = 'rubric-pdf-v5-relaxed-fashoda'
 COMMON = {
     4: ('사건 명칭·생산 방식 전환·면직물 생산 증가를 모두 설명', '사건과 생산 방식, 생산량의 관계를 함께 설명했습니다. 자료와 인과관계가 자연스럽게 연결되는지 확인하세요.'),
     3: ('생산 방식 전환과 생산 증가를 설명하나 사건 명칭이 없음', '생산 방식과 생산량의 변화를 연결했습니다. 변화가 일어난 역사적 사건의 명칭을 확인해 보세요.'),
@@ -46,9 +46,9 @@ RUBRICS = {
             1: ('세실 로즈의 제국주의 정책을 서술하지 못함', '발언에 나타난 정책 추진 이유와 지도에 나타난 변화를 나누어 살펴보세요.'),
         }),
         'france': ('제국주의에 대한 사실적 이해', {
-            4: ('프랑스인의 관점에서 횡단정책과 파쇼다 사건을 모두 서술', '정책과 충돌 사건을 프랑스인의 관점에서 설명했습니다. 당시 반응의 근거를 자료에서 확인해 보세요.'),
-            3: ('프랑스의 정책 명칭과 충돌 사건명 중 하나만 서술', '정책 명칭과 충돌 사건명 중 하나를 제시했습니다. 나머지 요소와 프랑스인의 관점을 보완해 보세요.'),
-            2: ('두 명칭 없이 제국주의에 관해 서술', '제국주의의 상황을 설명했습니다. 요구된 정책과 사건을 구분하고 프랑스인의 관점으로 정리해 보세요.'),
+            4: ('프랑스의 횡단정책·영국의 종단정책과 두 정책의 충돌인 파쇼다 사건의 결과를 서술하거나, 기존 기준대로 프랑스인의 관점에서 횡단정책과 파쇼다 사건을 서술', '두 국가의 정책과 충돌 사건의 결과를 설명했거나, 정책과 사건을 당시 사람의 관점에서 설명했습니다. 자료와 사실관계의 연결을 확인해 보세요.'),
+            3: ('정책이나 충돌 사건을 서술했으나 만점 기준의 일부 요소가 부족함', '정책이나 충돌 사건을 제시했습니다. 두 국가의 정책과 사건의 결과를 연결하거나 당시 사람의 관점으로 설명해 보세요.'),
+            2: ('두 명칭 없이 제국주의에 관해 서술', '제국주의의 상황을 설명했습니다. 요구된 정책과 사건을 구분하고 그 결과를 정리해 보세요.'),
             1: ('제국주의에 관해 서술하지 못함', '지도에서 두 국가의 세력 확대 방향을 비교하고 프랑스가 느꼈을 반응을 생각해 보세요.'),
         }),
         'africa': ('제국주의에 대한 비판적 이해', {
@@ -186,11 +186,30 @@ def score_answer(exam, key, answers):
         incident = has('충돌 사건', '파쇼다')
         viewpoint = has('프랑스 관점', '우리프랑스', '프랑스인', '프랑스의입장', '프랑스입장', '나는', '우리')
         imperial = has('제국주의 상황', '제국주의', '식민지', '영국', '프랑스', '아프리카')
-        checks = [policy, incident, viewpoint]
-        if policy and incident and viewpoint:
+        british_policy = has('영국 정책', '종단정책')
+        # Accept factual explanations without requiring first-person narration.
+        # Bind an outcome to its actor so a British retreat is not credited.
+        outcome_text = re.sub(r'[,，:：()·]', '', compact)
+        outcome_text = re.sub(
+            r'(?:철수|후퇴|물러|양보|굴복|포기|승리|이겼|타협|합의|화해|해결|마무리)'
+            r'[가-힣]{0,6}?(?:않|아니|없|못)', ' ', outcome_text)
+        outcome = re.search(
+            r'프랑스(?:군)?(?:은|는|이|가|의)?(?:결국|마침내|영국에|영국에게|영국측에|파쇼다에서|수단에서|군대를|군대가|병력을|병력이)*'
+            r'(?:철수|후퇴|물러|양보|굴복|포기)|'
+            r'영국(?:은|는|이|가)?(?:결국|마침내|프랑스를상대로)*(?:승리|승리했|이겼)|'
+            r'(?:양국|두나라|영국과프랑스|프랑스와영국)(?:은|는|이|가)?'
+            r'(?:결국|협상으로|외교적으로|평화적으로)*(?:타협|합의|화해)|'
+            r'(?:사건|충돌|갈등)(?:은|는|이|가)?(?:결국)?(?:평화적으로|협상으로|외교적으로)(?:해결|마무리)',
+            outcome_text)
+        result = bool(outcome) and incident
+        if result:
+            evidence.append('충돌 결과: ' + outcome.group())
+        factual_explanation = british_policy and result
+        checks = [policy, incident, viewpoint or factual_explanation]
+        if policy and incident and (viewpoint or factual_explanation):
             score = 4
         elif policy or incident:
-            # Named facts earn partial credit; full credit also needs viewpoint.
+            # Named facts earn partial credit until either full-credit route is met.
             score = 3
         elif not policy and not incident:
             score = 2 if imperial else 1

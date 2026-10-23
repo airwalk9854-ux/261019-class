@@ -77,6 +77,30 @@ class RubricTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(score_answer('industry', 'positive', {'positive': text})['score'], expected)
 
+    def test_france_factual_explanation_earns_full_credit_without_viewpoint(self):
+        prefix = '프랑스의 횡단정책과 영국의 종단정책이 파쇼다 사건에서 충돌했다. '
+        for ending in ['프랑스가 철수했다.', '프랑스는 영국에 양보하였다.',
+                       '프랑스군이 후퇴했다.', '영국이 승리했다.',
+                       '두 나라는 협상으로 타협했다.', '사건은 평화적으로 해결되었다.']:
+            with self.subTest(ending=ending):
+                text = prefix + ending
+                result = evaluate('imperialism', {'france': text})['france']
+                self.assertEqual(result['score'], 4)
+                self.assertTrue(all(result['criteria_checks']))
+                self.assertNotIn('보완할 부분:', result['feedback'])
+        for ending in ['', '영국이 철수했다.', '프랑스가 철수하지 않았다.',
+                       '프랑스가 승리했다.']:
+            with self.subTest(ending=ending):
+                self.assertEqual(score_answer('imperialism', 'france',
+                                             {'france': prefix + ending})['score'], 3)
+        for text in [
+            '프랑스의 횡단정책은 파쇼다 사건에서 충돌했고 프랑스가 철수했다.',
+            '프랑스의 종단정책과 영국의 횡단정책이 파쇼다에서 충돌했고 프랑스가 철수했다.',
+            '프랑스의 횡단정책과 영국의 종단정책이 충돌했고 프랑스가 철수했다.',
+        ]:
+            with self.subTest(text=text):
+                self.assertLess(score_answer('imperialism', 'france', {'france': text})['score'], 4)
+
     def test_joint_first_question_and_automatic_partial_scores(self):
         result = evaluate('industry', {'event': '산업혁명', 'production': '가내 수공업에서 공장제 기계공업으로 바뀌어 면직물 생산량이 증가했다.'})
         self.assertEqual(result['event']['score'], 0)
