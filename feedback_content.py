@@ -12,8 +12,8 @@ SOURCE_VERSION = 'feedback-pdf-v1'
 FACTS = {
     'event': '방적기·방직기의 발명과 증기 기관의 사용은 생산 방식 변화의 중요한 배경이었습니다.',
     'production': '방적기·방직기와 증기 기관은 면직물 생산 방식의 변화를 이끌었습니다. 기술의 변화가 생산 규모에 미친 영향을 연결해 생각해 보세요.',
-    'positive': '철도는 이동과 생활 범위를 바꾸었고, 시간표는 규칙적인 생활과 연결되었습니다. 만국 박람회에서는 기계·섬유 등 생산 기술의 발전을 보여 주었습니다.',
-    'positive_rail': '철도의 발달은 사람들의 이동과 생활 범위를 바꾸었습니다. 시계와 시간표의 등장은 정확하고 규칙적인 시간 개념과 연결되었습니다.',
+    'positive': '철도 자료에서는 운송과 이동의 변화, 생산비와 상품 시장의 관계를 살펴보세요. 만국 박람회에서는 기계·섬유 등 생산 기술의 발전을 보여 주었습니다.',
+    'positive_rail': '철도 기사는 원료·상품 운송과 사람의 이동을 다룹니다. 철도 건설이 생산비와 상품 시장에 어떤 영향을 주는지 자료의 근거로 연결해 보세요.',
     'positive_exhibition': '만국 박람회에서는 강철·기계·섬유 등 생산 기술의 발전을 보여 주었습니다.',
     'negative': '산업화 시기에는 아동의 장시간 노동과 열악한 노동 환경이 나타났고, 도시 위생 악화와 환경 오염은 전염병 유행과 연결되었습니다.',
     'negative_labour': '아동들도 장시간 고된 노동에 시달렸습니다. 제시된 인터뷰의 수면 시간과 노동 시간을 노동 환경의 근거로 살펴보세요.',
@@ -43,6 +43,8 @@ CRITERIA = {
 }
 
 def source_for(exam_id, key):
+    if exam_id == 'industry' and key == 'positive':
+        return {'file': '논술형 문항1.pdf', 'pages': [1], 'version': 'industry-question-v2-rail'}
     pages = PAGES[key]
     if isinstance(pages, dict):
         pages = pages[exam_id]

@@ -61,7 +61,7 @@ def affirmed_text(text):
     """Exclude locally negated factual claims while retaining critical opinions."""
     compact = normalized(text)
     compact = re.sub(
-        r'(?:산업혁명|industrialrevolution|착취|수탈|침략|전시|확보|확대|발전|발달|증가|늘|감소|줄어|줄었|발생|유행|충돌|노동|추진|빼앗|오염|일하|종단정책|횡단정책|파쇼다)'
+        r'(?:산업혁명|industrialrevolution|착취|수탈|침략|전시|확보|확대|운송|운반|수송|이동|절감|확장|낮추|낮아|줄이|넓히|넓어|넓혔|발전|발달|증가|늘|감소|줄어|줄었|발생|유행|충돌|노동|추진|빼앗|오염|일하|종단정책|횡단정책|파쇼다)'
         r'[가-힣]{0,6}?(?:않|아니|없|못)',
         ' ', compact)
     # A named country's opposite policy is a factual error, never a typo.
@@ -92,7 +92,7 @@ def needs_context(text, key):
     # Criticism such as "정당화할 수 없다" or "쉬지도 못했다" is
     # compatible with these tasks. Negated facts receive a scoring explanation.
     return bool(re.search(
-        r'(?:착취|수탈|침략|전시|확보|확대|발전|발달|증가|발생|유행|충돌|노동|추진|빼앗|오염|일하)[가-힣]{0,5}(?:않|아니|없|못)|'
+        r'(?:착취|수탈|침략|전시|확보|확대|운송|운반|수송|이동|절감|확장|낮추|낮아|줄이|넓히|넓어|넓혔|발전|발달|증가|발생|유행|충돌|노동|추진|빼앗|오염|일하)[가-힣]{0,5}(?:않|아니|없|못)|'
         r'(?:종단정책|횡단정책|파쇼다)[가-힣]{0,4}(?:아니|없)|'
         r'감소|줄어', compact))
 

@@ -65,14 +65,19 @@ class AssessmentTests(unittest.TestCase):
         for exam in ['industry', 'imperialism']:
             result = evaluate(exam, {})
             for item in result.values():
-                self.assertEqual(item['source']['file'], SOURCE_FILE)
-                self.assertEqual(item['source']['version'], SOURCE_VERSION)
+                if exam == 'industry' and item is result['positive']:
+                    self.assertEqual(item['source']['file'], '논술형 문항1.pdf')
+                    self.assertEqual(item['source']['version'], 'industry-question-v2-rail')
+                else:
+                    self.assertEqual(item['source']['file'], SOURCE_FILE)
+                    self.assertEqual(item['source']['version'], SOURCE_VERSION)
                 self.assertTrue(all(1 <= p <= 5 for p in item['source']['pages']))
                 self.assertNotIn('공장법', item['feedback'])
                 self.assertNotIn('모범 답안:', item['feedback'])
             self.assertNotIn('산업혁명', result['event']['feedback'])
         rail = evaluate('industry', {'positive': '철도가 발달했다'})['positive']
-        self.assertIn('시간표', rail['feedback'])
+        self.assertIn('생산비', rail['feedback'])
+        self.assertNotIn('시간표', rail['feedback'])
         self.assertNotIn('박람회', rail['feedback'])
         self.assertIn('보완할 부분', rail['feedback'])
         exhibition = evaluate('industry', {'positive': '박람회에서 기술을 전시했다'})['positive']
@@ -120,7 +125,8 @@ class AssessmentTests(unittest.TestCase):
             app.run()
         self.assertFalse(app.exception)
         captions = [item.value for item in app.caption]
-        self.assertEqual(sum('피드백 근거: 피드백 내용.pdf' in value for value in captions), 5)
+        self.assertEqual(sum('피드백 근거: 피드백 내용.pdf' in value for value in captions), 4)
+        self.assertEqual(sum('피드백 근거: 논술형 문항1.pdf' in value for value in captions), 1)
         self.assertEqual(sum('채점 근거: 논술형 문항1 답안.pdf' in value for value in captions), 4)
         self.assertGreaterEqual(len(app.info), 5)
         self.assertEqual(before, store.get('industry', 's1'))
@@ -276,7 +282,7 @@ class AssessmentTests(unittest.TestCase):
         from question_content import QUESTIONS
         best = [
             {'event': '산업혁명', 'production': '가내 수공업에서 공장제 기계공업으로 변하여 면직물 생산량이 증가하였다.'},
-            {'positive': '철도로 생활 범위와 여가 활동이 확대되고 시간표를 통해 시간 개념이 생겼다.'},
+            {'positive': '철도의 발달로 원료와 상품 운송, 사람의 이동이 활발해졌고 상품의 생산비를 낮추고 상품 시장을 넓혔다.'},
             {'negative': '인터뷰에 따르면 아동에 대한 노동 착취가 심각하였다.'},
             {'critique': '박람회는 산업과 국력의 발전을 보여주지만 식민지 전시장은 식민지 주민의 착취를 보여 준다.'},
             {'rhodes': '실업 문제 해결과 시장 확보를 위해 제국주의를 추진했고 많은 식민지를 확보하였다.'},

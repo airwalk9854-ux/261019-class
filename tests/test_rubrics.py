@@ -29,9 +29,9 @@ class RubricTests(unittest.TestCase):
             ('industry', 'production', 2, '산업혁명으로 가내 수공업에서 공장제 기계공업으로 변하였다.'),
             ('industry', 'production', 1, ''),
             ('industry', 'positive', 4, '만국 박람회에서 발전된 기계를 전시하여 산업과 국력을 과시했다.'),
-            ('industry', 'positive', 4, '철도로 생활 범위와 여가 활동이 확대되고 시간표를 통해 시간 개념이 생겼다.'),
+            ('industry', 'positive', 4, '철도의 발달로 원료와 상품 운송, 사람의 이동이 활발해졌고 상품의 생산비를 낮추고 상품 시장을 넓혔다.'),
             ('industry', 'positive', 3, '박람회를 통해 산업혁명의 성과를 알렸다.'),
-            ('industry', 'positive', 3, '철도로 생활 범위가 넓어지고 여가를 즐겼다.'),
+            ('industry', 'positive', 3, '철도의 발달로 원료와 상품 운송, 사람의 이동이 활발해졌다.'),
             ('industry', 'positive', 2, '영국 만국 박람회가 긍정적인 사례다.'),
             ('industry', 'positive', 1, ''),
             ('industry', 'negative', 4, '인터뷰에 따르면 아동에 대한 노동 착취가 심각하였다.'),
@@ -64,6 +64,18 @@ class RubricTests(unittest.TestCase):
                 actual = score_answer(exam, key, {key: text})
                 self.assertEqual(actual['score'], expected)
                 self.assertEqual(actual['score_feedback'], band_feedback(exam, key, expected))
+
+    def test_revised_rail_requires_current_article_evidence(self):
+        cases = [
+            (2, '철도로 생활 범위와 여가 활동이 확대되고 시간표를 통해 시간 개념이 생겼다.'),
+            (2, '철도가 부설되었다.'),
+            (3, '철도로 원료와 상품 운송, 사람의 이동이 활발해졌다.'),
+            (4, '철도로 원료와 상품 운송, 사람의 이동이 활발해졌다. 생산비를 낮추고 상품 시장을 넓혔다.'),
+            (3, '철도로 원료와 상품 운송, 사람의 이동이 활발해졌다. 생산비를 낮추지 않았고 상품 시장을 넓히지 않았다.'),
+        ]
+        for expected, text in cases:
+            with self.subTest(text=text):
+                self.assertEqual(score_answer('industry', 'positive', {'positive': text})['score'], expected)
 
     def test_joint_first_question_and_automatic_partial_scores(self):
         result = evaluate('industry', {'event': '산업혁명', 'production': '가내 수공업에서 공장제 기계공업으로 바뀌어 면직물 생산량이 증가했다.'})

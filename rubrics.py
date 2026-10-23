@@ -7,7 +7,7 @@ import re
 from answer_matching import normalized, matching_terms, needs_context, affirmed_text, event_is_correct
 from spelling import check_spelling
 
-VERSION = 'rubric-pdf-v3-automatic-spelling'
+VERSION = 'rubric-pdf-v4-revised-industry-rail'
 COMMON = {
     4: ('사건 명칭·생산 방식 전환·면직물 생산 증가를 모두 설명', '사건과 생산 방식, 생산량의 관계를 함께 설명했습니다. 자료와 인과관계가 자연스럽게 연결되는지 확인하세요.'),
     3: ('생산 방식 전환과 생산 증가를 설명하나 사건 명칭이 없음', '생산 방식과 생산량의 변화를 연결했습니다. 변화가 일어난 역사적 사건의 명칭을 확인해 보세요.'),
@@ -18,8 +18,8 @@ RUBRICS = {
     'industry': {
         'production': ('산업혁명의 역사 이해', COMMON),
         'positive': ('산업혁명의 긍정적 영향 분석', {
-            4: ('박람회의 기계 전시와 산업·국력 과시 또는 철도의 생활·여가·시간 개념 변화를 구체적으로 설명', '선택한 변화와 구체적인 영향을 자료에 연결했습니다. 한 가지 사례를 중심으로 설명을 정돈해 보세요.'),
-            3: ('박람회의 성과 알림 또는 철도의 생활 범위·여가 확대를 설명', '긍정적 영향과 그 결과를 설명했습니다. 기사에 나타난 구체적 근거를 더 살펴보세요.'),
+            4: ('박람회의 기계 전시와 산업·국력 과시 또는 철도의 원료·상품 운송 및 사람 이동과 생산비 절감·시장 확대를 구체적으로 설명', '선택한 변화와 구체적인 영향을 자료에 연결했습니다. 한 가지 사례를 중심으로 설명을 정돈해 보세요.'),
+            3: ('박람회의 성과 알림 또는 철도의 원료·상품 운송 및 사람 이동 활성화를 설명', '긍정적 영향과 그 결과를 설명했습니다. 기사에 나타난 구체적 근거를 더 살펴보세요.'),
             2: ('박람회 또는 철도 발달을 긍정적 영향으로 제시', '긍정적 변화의 사례를 제시했습니다. 그 변화가 산업이나 생활에 어떤 영향을 주었는지 설명해 보세요.'),
             1: ('긍정적인 영향을 서술하지 못함', '기사에서 생활이나 산업의 변화를 보여주는 사례 한 가지를 골라 그 의미를 살펴보세요.'),
         }),
@@ -114,13 +114,17 @@ def score_answer(exam, key, answers):
         display = has('기계 전시', '기계전시', '기계를전시', '기계를보여')
         power = has('산업·국력', '국력', '산업발전', '산업이발전')
         achievement = has('성과 소개', '성과', '전시', '기술', '발전')
-        life = has('생활 범위', '생활범위', '이동범위')
-        leisure = has('여가', '여가', '여행')
-        time = has('시간 개념', '시간개념', '시간표', '규칙적인시간', '규칙적시간')
-        checks = [exhibition or rail, (exhibition and achievement) or (rail and (life or leisure or time))]
-        if (exhibition and display and power) or (rail and life and leisure and time):
+        raw = has('원료 운송', '원료')
+        goods = has('상품 운송', '상품', '물건')
+        transport = has('운송', '운송', '운반', '수송', '실어나')
+        movement = has('사람 이동', '사람의이동', '사람이동', '사람들이이동', '사람들의이동', '사람을이동', '승객', '여객')
+        cost = has('생산비 절감', '생산비를낮', '생산비가낮', '생산비절감', '생산비용절감', '생산비를줄', '생산비가줄', '생산비용을낮', '생산비용을줄')
+        market = has('시장 확대', '시장을넓', '시장이넓', '시장확대', '상품시장확대', '시장을확대', '시장이확대', '시장확장')
+        rail_effect = rail and raw and goods and transport and movement
+        checks = [exhibition or rail, (exhibition and achievement) or rail_effect]
+        if (exhibition and display and power) or (rail_effect and cost and market):
             score = 4
-        elif (exhibition and achievement) or (rail and life and leisure):
+        elif (exhibition and achievement) or rail_effect:
             score = 3
         elif exhibition or rail:
             score = 2

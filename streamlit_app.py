@@ -64,9 +64,9 @@ def show_materials(material):
     if material == 'production':
         left, right = st.columns(2)
         with left:
-            show_material_image('2', (64, 93, 292, 267), '(가) 가내 수공업')
+            show_material_image('1', (60, 93, 296, 270), '(가) 가내 수공업')
         with right:
-            show_material_image('2', (302, 94, 528, 267), '(나) 공장제 기계공업')
+            show_material_image('1', (300, 93, 536, 270), '(나) 공장제 기계공업')
     elif material == 'news':
         st.caption('19세기 영국 사회를 다룬 가상의 신문 기사 · 원본의 기사와 설명을 읽기 쉬운 글로 재구성했습니다.')
         for title, text in NEWS:
@@ -220,6 +220,7 @@ if not st.session_state.get('identity'):
 identity = st.session_state['identity']
 if identity['role'] == '교사':
     st.header('교사 검토실')
+    st.warning('수정된 문항1 문제지는 3·3·3·5점(총 14점), 답안 채점표는 4·4·4·8점(총 20점)으로 배점이 다릅니다. 앱은 구간별 기준이 명시된 답안 채점표를 적용합니다. 공통 1번을 한 번만 합산한 전체 학습 만점은 36점입니다.')
     st.warning('문항2 채점기준 마지막 항목의 영국 “횡단정책” 표기는 검토가 필요합니다. 영국의 종단정책을 기준으로 자동 피드백을 구성했습니다. 원본 문항2의 세부 문항 번호 3-1~3-3을 유지했습니다.')
     st.caption('표현 확인 규칙으로 원본 점수 구간을 자동 적용합니다. 교사 추가 검토와 점수 조정은 선택 사항이며 학생의 자동 채점 결과는 즉시 제공됩니다. 1-①과 1-②는 합산 4점이며, 원본 기준의 최저 점수는 항목당 1점입니다.')
     with st.expander('전체 루브릭 · 배점과 점수별 피드백 표'):

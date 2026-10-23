@@ -15,7 +15,7 @@ class ParaphraseTests(unittest.TestCase):
     def test_paraphrases_use_same_rubric_and_feedback_checks(self):
         cases = [
             ('industry', 'production', 4, '산업혁명 때 집에서 손으로 짜던 옷감을 공장에서 기계로 만들게 되었고 훨씬 많이 생산했다.'),
-            ('industry', 'positive', 4, '기찻길이 놓여 먼 곳까지 갈 수 있었고 관광을 즐겼다. 출발 시각이 정해져 생활도 규칙적으로 바뀌었다.'),
+            ('industry', 'positive', 4, '기찻길로 원료와 물건을 운반하고 승객이 이동했다. 생산비용을 줄이고 시장을 확대했다.'),
             ('industry', 'positive', 4, '만국 박람회에서 기계들을 전시해 발전한 나라의 힘을 과시하였다.'),
             ('industry', 'negative', 4, '신문의 증언에서 아이들이 하루 열다섯 시간씩 일했다고 한다.'),
             ('industry', 'negative', 4, '도시 빈민촌의 위생이 불결하고 물이 오염되어 감염병이 퍼졌다.'),
